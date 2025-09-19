@@ -1,0 +1,459 @@
+# Telco Customer Churn Prediction - .gitignore
+
+# ====================================
+# Python Files
+# ====================================
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+.pybuilder/
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# poetry
+poetry.lock
+
+# pdm
+.pdm.toml
+
+# PEP 582
+__pypackages__/
+
+# Celery stuff
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# PyCharm
+.idea/
+
+# ====================================
+# Data Files and Artifacts
+# ====================================
+# Large datasets (keep structure but ignore data)
+data/raw/*.csv
+data/raw/*.xlsx
+data/raw/*.xls
+data/raw/*.json
+data/raw/*.parquet
+data/processed/*.csv
+data/processed/*.xlsx
+data/processed/*.json
+data/processed/*.parquet
+
+# Model artifacts
+artifacts/models/
+*.pkl
+*.pickle
+*.joblib
+*.h5
+*.hdf5
+*.pb
+*.onnx
+*.pt
+*.pth
+
+# Trained encoders and scalers
+artifacts/encode/*.json
+artifacts/encode/*.pkl
+artifacts/encode/*.joblib
+
+# Evaluation artifacts
+artifacts/evaluation/
+artifacts/predictions/
+artifacts/reports/
+
+# Feature artifacts
+artifacts/features/
+
+# Logs
+*.log
+logs/
+data_pipeline.log
+training_pipeline.log
+inference_pipeline.log
+
+# ====================================
+# Machine Learning Specific
+# ====================================
+# MLflow artifacts
+mlruns/
+mlflow.db
+
+# Weights & Biases
+wandb/
+
+# TensorBoard logs
+runs/
+tb_logs/
+
+# Experiment tracking
+experiments/
+checkpoints/
+
+# Model registry
+model_registry/
+
+# AutoML outputs
+automl_outputs/
+
+# Hyperparameter tuning results
+hyperparameter_results/
+
+# ====================================
+# Operating System Files
+# ====================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+
+# Thumbnails
+._*
+
+# Files that might appear in the root of a volume
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Directories potentially created on remote AFP share
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.tmp
+*.temp
+Desktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# Linux
+*~
+
+# ====================================
+# IDE and Editor Files
+# ====================================
+# Visual Studio Code
+.vscode/
+*.swp
+*.swo
+
+# Sublime Text
+*.sublime-workspace
+*.sublime-project
+
+# Vim
+[._]*.s[a-v][a-z]
+[._]*.sw[a-p]
+[._]s[a-rt-v][a-z]
+[._]ss[a-gi-z]
+[._]sw[a-p]
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# Nano
+*.save
+*.swp
+
+# ====================================
+# Configuration and Secrets
+# ====================================
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Configuration files with secrets
+config/secrets.yaml
+config/credentials.json
+secrets/
+credentials/
+
+# Database connection strings
+*.db_url
+database.ini
+
+# API keys and tokens
+api_keys.txt
+*.key
+*.pem
+*.p12
+
+# ====================================
+# Build and Deployment
+# ====================================
+# Docker
+Dockerfile.local
+docker-compose.override.yml
+.dockerignore
+
+# Kubernetes
+*.k8s.yaml
+*.yaml.backup
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Cloud deployment
+.gcloud/
+.aws/
+.azure/
+
+# ====================================
+# Testing
+# ====================================
+# Test outputs
+test_outputs/
+test_results/
+.coverage
+htmlcov/
+
+# Performance testing
+performance_results/
+load_test_results/
+
+# ====================================
+# Documentation
+# ====================================
+# Rendered documentation
+docs/_build/
+docs/build/
+site/
+
+# ====================================
+# Temporary and Cache Files
+# ====================================
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Cache directories
+.cache/
+cache/
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# ====================================
+# Project Specific
+# ====================================
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Jupyter notebook outputs (keep notebooks but not outputs)
+*.ipynb
+
+# Model checkpoints during training
+checkpoints/
+model_checkpoints/
+
+# Data splits and feature engineering outputs (keep structure)
+artifacts/data/*.csv
+
+# Preprocessed datasets
+preprocessed/
+
+# Feature store outputs
+feature_store/
+
+# Pipeline artifacts
+pipeline_artifacts/
+
+# Monitoring and observability
+monitoring/
+observability/
+
+# ====================================
+# Keep Important Files (Negation Rules)
+# ====================================
+# Keep essential configuration files
+!config.yaml
+!requirements.txt
+!Makefile
+!README.md
+!Readme.md
+
+# Keep directory structure files
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!artifacts/data/.gitkeep
+!artifacts/models/.gitkeep
+!artifacts/encode/.gitkeep
+
+# Keep sample data (if small)
+!data/raw/sample_*.csv
+!data/raw/example_*.csv
+
+# Keep pipeline scripts
+!pipelines/
+!src/
+!utils/
+
+# Keep documentation
+!docs/README.md
+!docs/*.md
+
+# ====================================
+# Notes
+# ====================================
+# This .gitignore is designed for a machine learning project with:
+# - Python-based data pipelines
+# - Model training and evaluation
+# - Feature engineering and encoding
+# - Artifact management
+# - Multiple data formats support
+# - Cross-platform development
+#
+# Adjust patterns based on your specific needs and team requirements.
