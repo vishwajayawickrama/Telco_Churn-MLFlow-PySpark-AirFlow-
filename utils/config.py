@@ -332,6 +332,10 @@ def get_preprocessing_config() ->Dict[str, Any]:
     config = get_config()
     return config.get('preprocessing', {})
 
+def get_mlflow_config():
+    config = load_config()
+    return config.get('mlflow', {})
+
 
 def get_selected_model_config() ->Dict[str, Any]:
     training_config = get_training_config()

@@ -23,7 +23,7 @@ class MLflowTracker:
         tracking_uri = self.config.get('tracking_uri', 'file:./mlruns')
         mlflow.set_tracking_uri(tracking_uri)
         
-        experiment_name = self.config.get('experiment_name', 'churn_prediction_experiment')
+        experiment_name = self.config.get('experiment_name', 'telco_customer_churn_experiment')
         
         try:
             experiment = mlflow.get_experiment_by_name(experiment_name)
