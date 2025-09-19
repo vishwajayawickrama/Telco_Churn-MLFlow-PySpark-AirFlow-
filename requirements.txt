@@ -49,6 +49,10 @@ flake8>=5.0.0
 openai>=0.27.0
 groq>=0.11.0
 
+# Monitoring and Logging (MLflow will be added back later)
+mlflow>=1.30.0
+wandb>=0.15.0
+
 # Optional: Additional ML libraries
 # catboost>=1.1.0
 # optuna>=3.0.0
