@@ -2,105 +2,71 @@ import os
 import sys
 import json
 import joblib
-import pickle
 import pandas as pd
 import numpy as np
-from typing import Any, Dict, List, Optional, Tuple, Union
 from datetime import datetime
 from sklearn.base import BaseEstimator
-
-# Add utils to path for logger import
+from feature_binning import CustomBinningStrategy
+from feature_encoding import OrdinalEncodingStrategy
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
+from config import get_binning_config, get_encoding_config
 from logger import get_logger, ProjectLogger, log_exceptions
 
-# Initialize logger
 logger = get_logger(__name__)
 
 
 class ModelInference:
     """
-    Comprehensive model inference class for making predictions with trained models.
-    """
+    Comprehensive model inference class for Telco customer churn prediction.
     
-    def __init__(self, model_path: Optional[str] = None, model: Optional[BaseEstimator] = None):
+    This class handles the complete inference pipeline for predicting customer churn
+    in telecommunications services, including data preprocessing, feature encoding,
+    tenure binning, and model prediction.
+    """
+
+    def __init__(self, model_path: str):
         """
         Initialize model inference.
         
         Args:
-            model_path (Optional[str]): Path to saved model file
-            model (Optional[BaseEstimator]): Pre-loaded model object
+            model_path (str): Path to saved model file
         """
-        self.model = None
-        self.model_path = model_path
-        self.model_metadata = {}
-        self.feature_columns = None
-        self.encoders = {}
-        self.scaler = None
-        self.inference_history = []
-        
-        ProjectLogger.log_section_header(logger, "INITIALIZING MODEL INFERENCE")
-        
-        if model is not None:
-            self.model = model
-            logger.info(f"Model provided directly: {type(model).__name__}")
-        elif model_path is not None:
-            self.load_model(model_path)
-        else:
-            logger.info("No model provided. Use load_model() to load a model.")
+        try:
+            ProjectLogger.log_section_header(logger, "INITIALIZING MODEL INFERENCE")
+            logger.info(f"Starting model inference initialization with model path: {model_path}")
+            
+            self.model_path = model_path
+            self.encoders = {} 
+            self.load_model()
+            self.binning_config = get_binning_config()
+            self.encoding_config = get_encoding_config()
+            
+            logger.info("Model inference initialization completed successfully")
+            ProjectLogger.log_success_header(logger, "MODEL INFERENCE INITIALIZED")
+            
+        except Exception as e:
+            ProjectLogger.log_error_header(logger, "MODEL INFERENCE INITIALIZATION FAILED")
+            logger.error(f"Failed to initialize model inference: {str(e)}")
+            raise
 
     @log_exceptions(logger)
-    def load_model(self, model_path: str, method: str = 'auto') -> None:
+    def load_model(self) -> None:
         """
         Load a trained model from file.
-        
-        Args:
-            model_path (str): Path to the model file
-            method (str): Loading method ('auto', 'joblib', 'pickle')
-            
-        Raises:
-            ValueError: If file doesn't exist
-            Exception: For any unexpected errors
         """
         ProjectLogger.log_step_header(logger, "STEP", "LOADING MODEL FOR INFERENCE")
         
         try:
-            # Validate file exists
-            if not os.path.exists(model_path):
-                raise ValueError(f"Model file not found: {model_path}")
-            
-            self.model_path = model_path
-            
-            # Get file info
-            file_size = os.path.getsize(model_path)
-            file_modified = datetime.fromtimestamp(os.path.getmtime(model_path))
-            
-            logger.info(f"Loading model from: {model_path}")
-            logger.info(f"File size: {file_size:,} bytes ({file_size / 1024 / 1024:.2f} MB)")
-            logger.info(f"Last modified: {file_modified}")
-            
-            # Determine loading method
-            if method == 'auto':
-                if model_path.endswith('.pkl'):
-                    method = 'pickle'
-                else:
-                    method = 'joblib'
-            
-            logger.info(f"Loading method: {method}")
-            
-            # Load model
-            if method == 'joblib':
-                self.model = joblib.load(model_path)
-            else:  # pickle
-                with open(model_path, 'rb') as f:
-                    self.model = pickle.load(f)
-            
+            if not os.path.exists(self.model_path):
+                raise ValueError(f"Model file not found: {self.model_path}")
+
+            logger.info(f"Loading model from: {self.model_path}")
+            self.model = joblib.load(self.model_path)
+
+            if self.model is None or not isinstance(self.model, BaseEstimator):
+                raise ValueError("Loaded object is not a valid sklearn model")
+
             logger.info(f"Model loaded successfully: {type(self.model).__name__}")
-            
-            # Load metadata if available
-            self._load_model_metadata()
-            
-            # Load encoders if available
-            self._load_encoders()
             
             ProjectLogger.log_success_header(logger, "MODEL LOADED FOR INFERENCE")
             
@@ -113,292 +79,285 @@ class ModelInference:
             ProjectLogger.log_error_header(logger, "UNEXPECTED ERROR IN MODEL LOADING")
             logger.error(f"Unexpected error: {str(e)}")
             raise
-
+    
     @log_exceptions(logger)
-    def predict(
-        self, 
-        data: Union[pd.DataFrame, np.ndarray, dict], 
-        return_probabilities: bool = False,
-        preprocess: bool = True
-    ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+    def load_encoders(self, encoder_dir) -> None:
         """
-        Make predictions on new data.
+        Load all encoder files from the artifacts/encode directory.
         
         Args:
-            data: Input data for prediction
-            return_probabilities (bool): Whether to return prediction probabilities
-            preprocess (bool): Whether to apply preprocessing
-            
-        Returns:
-            Union[np.ndarray, Tuple]: Predictions and optionally probabilities
-            
-        Raises:
-            ValueError: If model is not loaded or data is invalid
-            Exception: For any unexpected errors
+            encoder_dir (str): Path to the directory containing encoder files
         """
-        ProjectLogger.log_step_header(logger, "STEP", "MAKING MODEL PREDICTIONS")
+        ProjectLogger.log_step_header(logger, "STEP", "LOADING ENCODERS FOR INFERENCE")
         
         try:
-            # Validate model is loaded
-            if self.model is None:
-                raise ValueError("No model loaded. Use load_model() or provide model in constructor.")
+            logger.info(f"Starting to load encoders from directory: {encoder_dir}")
             
-            # Convert data to DataFrame if needed
-            if isinstance(data, dict):
+            # Validate encoder directory exists
+            if not os.path.exists(encoder_dir):
+                raise FileNotFoundError(f"Encoder directory not found: {encoder_dir}")
+            
+            if not os.path.isdir(encoder_dir):
+                raise ValueError(f"Path is not a directory: {encoder_dir}")
+            
+            # Get list of encoder files
+            try:
+                all_files = os.listdir(encoder_dir)
+                encoder_files = [f for f in all_files if f.endswith('_encoder.json')]
+                logger.info(f"Found {len(encoder_files)} encoder files in directory")
+                
+                if not encoder_files:
+                    logger.warning("No encoder files found in directory")
+                    return
+                    
+            except OSError as e:
+                logger.error(f"Error accessing directory {encoder_dir}: {str(e)}")
+                raise
+            
+            # Load each encoder file
+            loaded_count = 0
+            failed_count = 0
+            
+            for file in encoder_files:
+                try:
+                    logger.debug(f"Processing encoder file: {file}")
+                    
+                    # Extract feature name from filename
+                    if not file.endswith('_encoder.json'):
+                        logger.warning(f"Skipping non-encoder file: {file}")
+                        continue
+                    
+                    feature_name = file.split('_encoder.json')[0]
+                    file_path = os.path.join(encoder_dir, file)
+                    
+                    # Load encoder data
+                    with open(file_path, 'r') as f:
+                        encoder_data = json.load(f)
+                    
+                    # Validate encoder data
+                    if not isinstance(encoder_data, dict):
+                        logger.error(f"Invalid encoder format in {file}: expected dict, got {type(encoder_data)}")
+                        failed_count += 1
+                        continue
+                    
+                    # Store encoder
+                    self.encoders[feature_name] = encoder_data
+                    loaded_count += 1
+                    logger.debug(f"Successfully loaded encoder for feature: {feature_name}")
+                    
+                except json.JSONDecodeError as e:
+                    logger.error(f"Invalid JSON format in {file}: {str(e)}")
+                    failed_count += 1
+                    continue
+                    
+                except IOError as e:
+                    logger.error(f"Error reading file {file}: {str(e)}")
+                    failed_count += 1
+                    continue
+                    
+                except Exception as e:
+                    logger.error(f"Unexpected error loading {file}: {str(e)}")
+                    failed_count += 1
+                    continue
+            
+            # Log summary
+            total_files = len(encoder_files)
+            logger.info(f"Encoder loading summary: {loaded_count} successful, {failed_count} failed out of {total_files} files")
+            
+            if loaded_count == 0:
+                logger.warning("No encoders were successfully loaded")
+            else:
+                loaded_features = list(self.encoders.keys())
+                logger.info(f"Successfully loaded encoders for features: {loaded_features}")
+            
+            ProjectLogger.log_success_header(logger, "ENCODERS LOADING COMPLETED")
+            
+        except FileNotFoundError as e:
+            ProjectLogger.log_error_header(logger, "ENCODER DIRECTORY NOT FOUND")
+            logger.error(f"Directory error: {str(e)}")
+            raise
+            
+        except ValueError as e:
+            ProjectLogger.log_error_header(logger, "ENCODER DIRECTORY VALIDATION ERROR")
+            logger.error(f"Validation error: {str(e)}")
+            raise
+            
+        except Exception as e:
+            ProjectLogger.log_error_header(logger, "ENCODER LOADING FAILED")
+            logger.error(f"Unexpected error loading encoders: {str(e)}")
+            raise
+
+    
+    @log_exceptions(logger)
+    def preprocess_input(self, data):
+        """
+        Preprocess input data for Telco customer churn prediction.
+        
+        This method handles the complete preprocessing pipeline including:
+        - Label encoding for categorical features (gender, InternetService, etc.)
+        - Tenure binning (New, Established, Loyal customers)
+        - Ordinal encoding for Contract types
+        - Removal of identifier columns
+        
+        Args:
+            data: Input customer data to preprocess (dict or DataFrame)
+            
+        Returns:
+            pd.DataFrame: Preprocessed data ready for churn prediction
+        """
+        ProjectLogger.log_step_header(logger, "STEP", "PREPROCESSING INPUT DATA")
+        
+        try:
+            logger.info("Starting input data preprocessing")
+            
+            # Convert input to DataFrame
+            if not isinstance(data, pd.DataFrame):
+                logger.info("Converting input data to DataFrame")
                 data = pd.DataFrame([data])
-                logger.info("Converted dictionary input to DataFrame")
-            elif isinstance(data, np.ndarray):
-                data = pd.DataFrame(data)
-                logger.info("Converted numpy array to DataFrame")
-            elif not isinstance(data, pd.DataFrame):
-                raise ValueError("Data must be DataFrame, numpy array, or dictionary")
+            else:
+                logger.info(f"Input data shape: {data.shape}")
             
-            logger.info(f"Input data shape: {data.shape}")
-            logger.info(f"Input data type: {type(data).__name__}")
+            original_columns = data.columns.tolist()
+            logger.debug(f"Original columns: {original_columns}")
             
-            # Store original data info
-            inference_start = datetime.now()
-            original_shape = data.shape
-            
-            # Preprocess data if requested
-            if preprocess:
-                logger.info("Applying preprocessing...")
-                data = self._preprocess_data(data)
-                logger.info(f"Preprocessed data shape: {data.shape}")
-            
-            # Check for missing values
-            missing_values = data.isnull().sum().sum()
-            if missing_values > 0:
-                logger.warning(f"Found {missing_values} missing values in input data")
-                logger.warning("Missing values may affect prediction quality")
-            
-            # Make predictions
-            logger.info("Generating predictions...")
-            predictions = self.model.predict(data)
-            
-            logger.info(f"Predictions generated: {len(predictions)} samples")
-            logger.info(f"Prediction shape: {predictions.shape}")
-            
-            # Log prediction distribution
-            unique_predictions, counts = np.unique(predictions, return_counts=True)
-            logger.info("Prediction distribution:")
-            for pred, count in zip(unique_predictions, counts):
-                percentage = (count / len(predictions)) * 100
-                logger.info(f"  - {pred}: {count} samples ({percentage:.2f}%)")
-            
-            result = predictions
-            
-            # Get probabilities if requested and available
-            probabilities = None
-            if return_probabilities and hasattr(self.model, 'predict_proba'):
-                logger.info("Generating prediction probabilities...")
-                probabilities = self.model.predict_proba(data)
-                logger.info(f"Probabilities shape: {probabilities.shape}")
+            # Apply encoders
+            if self.encoders:
+                logger.info(f"Applying {len(self.encoders)} encoders to data")
+                encoded_columns = []
                 
-                # Log probability statistics
-                if probabilities.shape[1] == 2:  # Binary classification
-                    avg_confidence = np.mean(np.max(probabilities, axis=1))
-                    logger.info(f"Average prediction confidence: {avg_confidence:.4f}")
+                for col, encoder in self.encoders.items():
+                    if col in data.columns:
+                        try:
+                            logger.debug(f"Encoding column: {col}")
+                            data[col] = data[col].map(encoder)
+                            encoded_columns.append(col)
+                        except Exception as e:
+                            logger.error(f"Failed to encode column {col}: {str(e)}")
+                            continue
                 
-                result = (predictions, probabilities)
+                logger.info(f"Successfully encoded {len(encoded_columns)} columns: {encoded_columns}")
+            else:
+                logger.info("No encoders available - proceeding with original data")
+
+            # Apply binning
+            try:
+                logger.info("Applying tenure binning")
+                binning = CustomBinningStrategy(self.binning_config['tenure_bins'])
+                data = binning.bin_feature(data, 'tenure')
+                logger.debug("Tenure binning completed successfully")
+            except KeyError as e:
+                logger.error(f"tenure column not found for binning: {str(e)}")
+            except Exception as e:
+                logger.error(f"Error during binning: {str(e)}")
+                raise
+
+            # Apply ordinal encoding
+            try:
+                logger.info("Applying ordinal encoding")
+                encoder = OrdinalEncodingStrategy(self.encoding_config['ordinal_mappings'])
+                data = encoder.encode(data)
+                logger.debug("Ordinal encoding completed successfully")
+            except Exception as e:
+                logger.error(f"Error during ordinal encoding: {str(e)}")
+                raise
+
+            # Remove unnecessary columns
+            columns_to_drop = ['customerID']  # Remove customer identifier column
+            existing_columns_to_drop = [col for col in columns_to_drop if col in data.columns]
             
-            # Store inference history
-            inference_record = {
-                'timestamp': inference_start.isoformat(),
-                'input_shape': original_shape,
-                'output_shape': predictions.shape,
-                'model_type': type(self.model).__name__,
-                'preprocessing_applied': preprocess,
-                'probabilities_returned': return_probabilities,
-                'missing_values': missing_values
+            if existing_columns_to_drop:
+                logger.info(f"Dropping columns: {existing_columns_to_drop}")
+                data = data.drop(columns=existing_columns_to_drop, errors='ignore')
+            else:
+                logger.debug("No unnecessary columns found to drop")
+            
+            final_columns = data.columns.tolist()
+            logger.info(f"Preprocessing completed. Final shape: {data.shape}")
+            logger.debug(f"Final columns: {final_columns}")
+            
+            ProjectLogger.log_success_header(logger, "INPUT DATA PREPROCESSING COMPLETED")
+            return data
+            
+        except Exception as e:
+            ProjectLogger.log_error_header(logger, "INPUT DATA PREPROCESSING FAILED")
+            logger.error(f"Error in preprocessing input data: {str(e)}")
+            raise
+    
+    @log_exceptions(logger)
+    def predict(self, data):
+        """
+        Make Telco customer churn predictions on input customer data.
+        
+        Args:
+            data: Input customer data (dict or DataFrame) containing Telco customer features
+                 like gender, tenure, InternetService, Contract, etc.
+            
+        Returns:
+            dict: Churn prediction results with:
+                - Status: 'Churn' or 'Retained' 
+                - Confidence: Prediction confidence percentage
+        """
+        ProjectLogger.log_step_header(logger, "STEP", "MAKING PREDICTION")
+        
+        try:
+            logger.info("Starting prediction process")
+            
+            # Preprocess the input data
+            logger.info("Preprocessing input data for prediction")
+            pp_data = self.preprocess_input(data)
+            logger.debug(f"Preprocessed data shape: {pp_data.shape}")
+            
+            # Validate preprocessed data
+            if pp_data.empty:
+                raise ValueError("Preprocessed data is empty")
+            
+            if pp_data.isnull().any().any():
+                null_columns = pp_data.columns[pp_data.isnull().any()].tolist()
+                logger.warning(f"Null values found in columns: {null_columns}")
+            
+            # Make prediction
+            logger.info("Generating prediction")
+            y_pred = self.model.predict(pp_data)
+            logger.debug(f"Raw prediction: {y_pred}")
+            
+            # Get prediction probabilities
+            logger.info("Generating prediction probabilities")
+            y_prob_array = self.model.predict_proba(pp_data)
+            logger.debug(f"Prediction probabilities shape: {y_prob_array.shape}")
+            
+            if y_prob_array.shape[1] < 2:
+                raise ValueError("Model does not provide probabilities for both classes")
+            
+            y_prob = float(y_prob_array[0][1])
+            logger.debug(f"Raw probability for positive class: {y_prob}")
+            
+            # Convert prediction to readable format
+            y_pred_label = 'Churn' if y_pred[0] == 1 else 'Retained'
+            y_prob_percentage = round(y_prob * 100)
+            
+            logger.info(f"Prediction: {y_pred_label} with {y_prob_percentage}% confidence")
+            
+            result = {
+                "Status": y_pred_label,
+                "Confidence": f"{y_prob_percentage} %"
             }
-            self.inference_history.append(inference_record)
             
-            inference_end = datetime.now()
-            inference_duration = (inference_end - inference_start).total_seconds()
-            logger.info(f"Inference completed in {inference_duration:.3f} seconds")
-            
-            ProjectLogger.log_success_header(logger, "PREDICTIONS GENERATED SUCCESSFULLY")
+            logger.info("Prediction completed successfully")
+            ProjectLogger.log_success_header(logger, "PREDICTION COMPLETED")
             
             return result
             
         except ValueError as e:
             ProjectLogger.log_error_header(logger, "PREDICTION VALIDATION ERROR")
-            logger.error(f"Validation error: {str(e)}")
+            logger.error(f"Validation error during prediction: {str(e)}")
+            raise
+            
+        except AttributeError as e:
+            ProjectLogger.log_error_header(logger, "MODEL ATTRIBUTE ERROR")
+            logger.error(f"Model method not available: {str(e)}")
             raise
             
         except Exception as e:
-            ProjectLogger.log_error_header(logger, "UNEXPECTED ERROR IN PREDICTION")
-            logger.error(f"Unexpected error: {str(e)}")
+            ProjectLogger.log_error_header(logger, "PREDICTION FAILED")
+            logger.error(f"Unexpected error during prediction: {str(e)}")
             raise
-
-    @log_exceptions(logger)
-    def predict_single(
-        self, 
-        sample: Union[dict, pd.Series, np.ndarray],
-        return_probabilities: bool = False,
-        preprocess: bool = True
-    ) -> Union[Any, Tuple[Any, np.ndarray]]:
-        """
-        Make prediction on a single sample.
-        
-        Args:
-            sample: Single sample for prediction
-            return_probabilities (bool): Whether to return prediction probabilities
-            preprocess (bool): Whether to apply preprocessing
-            
-        Returns:
-            Union[Any, Tuple]: Single prediction and optionally probabilities
-        """
-        ProjectLogger.log_step_header(logger, "STEP", "MAKING SINGLE SAMPLE PREDICTION")
-        
-        try:
-            # Convert to DataFrame
-            if isinstance(sample, dict):
-                data = pd.DataFrame([sample])
-            elif isinstance(sample, pd.Series):
-                data = pd.DataFrame([sample])
-            elif isinstance(sample, np.ndarray):
-                data = pd.DataFrame([sample])
-            else:
-                raise ValueError("Sample must be dict, Series, or numpy array")
-            
-            logger.info("Processing single sample prediction")
-            
-            # Make prediction
-            result = self.predict(data, return_probabilities=return_probabilities, preprocess=preprocess)
-            
-            # Extract single result
-            if return_probabilities:
-                predictions, probabilities = result
-                single_prediction = predictions[0]
-                single_probabilities = probabilities[0]
-                
-                logger.info(f"Single prediction: {single_prediction}")
-                if probabilities.shape[1] == 2:  # Binary classification
-                    confidence = np.max(single_probabilities)
-                    logger.info(f"Prediction confidence: {confidence:.4f}")
-                
-                return single_prediction, single_probabilities
-            else:
-                single_prediction = result[0]
-                logger.info(f"Single prediction: {single_prediction}")
-                return single_prediction
-            
-        except Exception as e:
-            ProjectLogger.log_error_header(logger, "ERROR IN SINGLE SAMPLE PREDICTION")
-            logger.error(f"Error: {str(e)}")
-            raise
-
-    def _preprocess_data(self, data: pd.DataFrame) -> pd.DataFrame:
-        """
-        Apply preprocessing to input data.
-        
-        Args:
-            data (pd.DataFrame): Input data
-            
-        Returns:
-            pd.DataFrame: Preprocessed data
-        """
-        logger.info("Applying data preprocessing...")
-        
-        # This is a placeholder for preprocessing logic
-        # In a real implementation, you would:
-        # 1. Apply the same encoders used during training
-        # 2. Apply the same scaler used during training
-        # 3. Handle missing values consistently
-        # 4. Ensure feature order matches training data
-        
-        processed_data = data.copy()
-        
-        # Apply encoders if available
-        if self.encoders:
-            logger.info(f"Applying {len(self.encoders)} encoders...")
-            for column, encoder_path in self.encoders.items():
-                if column in processed_data.columns:
-                    try:
-                        with open(encoder_path, 'r') as f:
-                            encoder_mapping = json.load(f)
-                        processed_data[column] = processed_data[column].map(encoder_mapping)
-                        logger.debug(f"Applied encoder to column: {column}")
-                    except Exception as e:
-                        logger.warning(f"Could not apply encoder to {column}: {str(e)}")
-        
-        # Apply scaler if available
-        if self.scaler is not None:
-            logger.info("Applying scaling transformation...")
-            # This would apply the same scaler used during training
-            # Implementation depends on how the scaler was saved
-        
-        logger.info("Preprocessing completed")
-        return processed_data
-
-    def _load_model_metadata(self) -> None:
-        """Load model metadata if available."""
-        try:
-            metadata_path = self.model_path.replace('.pkl', '_metadata.json').replace('.joblib', '_metadata.json')
-            
-            if os.path.exists(metadata_path):
-                with open(metadata_path, 'r') as f:
-                    self.model_metadata = json.load(f)
-                
-                logger.info("Model metadata loaded:")
-                logger.info(f"  - Build timestamp: {self.model_metadata.get('build_timestamp', 'Unknown')}")
-                logger.info(f"  - Model parameters: {len(self.model_metadata.get('model_params', {}))}")
-                
-        except Exception as e:
-            logger.warning(f"Could not load model metadata: {str(e)}")
-
-    def _load_encoders(self) -> None:
-        """Load feature encoders if available."""
-        try:
-            artifacts_dir = os.path.join(os.path.dirname(self.model_path), '..', 'artifacts', 'encode')
-            
-            if os.path.exists(artifacts_dir):
-                encoder_files = [f for f in os.listdir(artifacts_dir) if f.endswith('_encoder.json')]
-                
-                for encoder_file in encoder_files:
-                    column_name = encoder_file.replace('_encoder.json', '')
-                    encoder_path = os.path.join(artifacts_dir, encoder_file)
-                    self.encoders[column_name] = encoder_path
-                
-                if self.encoders:
-                    logger.info(f"Found {len(self.encoders)} encoders: {list(self.encoders.keys())}")
-                
-        except Exception as e:
-            logger.warning(f"Could not load encoders: {str(e)}")
-
-    def get_model_info(self) -> Dict[str, Any]:
-        """
-        Get information about the loaded model.
-        
-        Returns:
-            Dict: Model information
-        """
-        if self.model is None:
-            return {'status': 'No model loaded'}
-        
-        info = {
-            'model_type': type(self.model).__name__,
-            'model_path': self.model_path,
-            'metadata': self.model_metadata,
-            'available_encoders': list(self.encoders.keys()),
-            'inference_count': len(self.inference_history),
-            'status': 'Model loaded and ready'
-        }
-        
-        return info
-
-    def get_inference_history(self) -> List[Dict[str, Any]]:
-        """
-        Get the inference history.
-        
-        Returns:
-            List: List of inference records
-        """
-        return self.inference_history
-
-    def clear_inference_history(self) -> None:
-        """Clear the inference history."""
-        self.inference_history = []
-        logger.info("Inference history cleared")
