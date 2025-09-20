@@ -14,6 +14,7 @@ from feature_scaling import MinMaxScalingStrategy
 from data_spiltter import SimpleTrainTestSplitStrategy
 from config import get_data_paths, get_columns, get_outlier_config, get_binning_config, get_encoding_config, get_scaling_config, get_splitting_config
 from logger import get_logger, ProjectLogger, log_exceptions
+from mlflow_utils import MLflowTracker, setup_mlflow_autolog, create_mlflow_run_tags
 
 logger = get_logger(__name__)
 
@@ -44,6 +45,15 @@ def data_pipeline(
         
         logger.info("Configuration loaded successfully")
 
+        mlflow_tracker = MLflowTracker()
+        setup_mlflow_autolog()
+        run_tags = create_mlflow_run_tags(
+                                        'data_pipeline', {
+                                            'data_source': data_path,
+                                        }
+                                    )
+        run = mlflow_tracker.start_run(run_name='data_pipeline', tags=run_tags)
+
         """
             01. Data Ingestion
         """
@@ -60,8 +70,7 @@ def data_pipeline(
         if (os.path.exists(x_train_path) and 
             os.path.exists(x_test_path) and 
             os.path.exists(y_train_path) and 
-            os.path.exists(y_test_path) and 
-            not force_rebuild):
+            os.path.exists(y_test_path)):
             
             logger.info("Found existing processed data files, loading them...")
             X_train = pd.read_csv(x_train_path)
@@ -74,6 +83,18 @@ def data_pipeline(
             logger.info(f"  - X_test shape: {X_test.shape}")
             logger.info(f"  - Y_train shape: {Y_train.shape}")
             logger.info(f"  - Y_test shape: {Y_test.shape}")
+            
+            mlflow_tracker.log_data_pipeline_metrics({
+                                                    'total_samples': len(X_train) + len(X_test),
+                                                    'train_samples': len(X_train),
+                                                    'test_samples': len(X_test),
+                                                    'x_train_path': x_train_path,
+                                                    'x_test_path': x_test_path,
+                                                    'y_train_path': y_train_path,
+                                                    'y_test_path': y_test_path,
+
+                                                    })
+            mlflow_tracker.end_run()
 
         logger.info(f"Loading raw data from: {data_path}")
         ingestor = DataIngestorCSV()
