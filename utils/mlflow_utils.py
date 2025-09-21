@@ -68,7 +68,7 @@ class MLflowTracker:
     def log_data_pipeline_metrics(self, dataset_info: Dict[str, Any]):
         """Log data pipeline metrics and artifacts"""
         try:
-            # Log dataset metrics
+            # Log dataset metrics (Metrics = Things in dataset that can be measured numerically)
             mlflow.log_metrics({
                 'dataset_rows': dataset_info.get('total_rows', 0),
                 'training_rows': dataset_info.get('train_rows', 0),
@@ -78,7 +78,7 @@ class MLflowTracker:
                 'outliers_removed': dataset_info.get('outliers_removed', 0)
             })
             
-            # Log dataset parameters
+            # Log dataset parameters (Parameters = Things that are set before running the experiment)
             mlflow.log_params({
                 'test_size': dataset_info.get('test_size', 0.2),
                 'random_state': dataset_info.get('random_state', 42),

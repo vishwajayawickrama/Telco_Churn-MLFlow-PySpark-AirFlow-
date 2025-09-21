@@ -49,11 +49,12 @@ def data_pipeline(
         mlflow_tracker = MLflowTracker()
         setup_mlflow_autolog()
         run_tags = create_mlflow_run_tags(
-                                        'data_pipeline', {
+                                        'data_pipeline', 
+                                        {
                                             'data_source': data_path,
                                         }
                                     )
-        run = mlflow_tracker.start_run(run_name='data_pipeline', tags=run_tags)
+        run = mlflow_tracker.start_run(run_name='01_data_pipeline_initial', tags=run_tags)
 
         """
             01. Data Ingestion
@@ -86,16 +87,27 @@ def data_pipeline(
             logger.info(f"  - Y_test shape: {Y_test.shape}")
 
             mlflow_tracker.log_data_pipeline_metrics({
-                                                    'total_samples': len(X_train) + len(X_test),
-                                                    'train_samples': len(X_train),
-                                                    'test_samples': len(X_test),
-                                                    'x_train_path': x_train_path,
-                                                    'x_test_path': x_test_path,
-                                                    'y_train_path': y_train_path,
-                                                    'y_test_path': y_test_path,
-
-                                                    })
+                'total_rows': len(X_train) + len(X_test),
+                'train_rows': len(X_train),
+                'test_rows': len(X_test),
+                'num_features': X_train.shape[1],
+                'missing_values': 0,  # Assuming processed data has no missing values
+                'outliers_removed': 0,  # Data already processed
+                'test_size': test_size,
+                'random_state': 42,
+                'missing_strategy': 'drop',
+                'outlier_method': 'iqr',
+                'encoding_applied': True,
+                'scaling_applied': True,
+                'feature_names': list(X_train.columns)
+            })
             mlflow_tracker.end_run()
+            return {
+                'X_train': X_train.values,
+                'X_test': X_test.values,
+                'Y_train': Y_train.values.ravel(),
+                'Y_test': Y_test.values.ravel()
+            }
 
         logger.info(f"Loading raw data from: {data_path}")
         ingestor = DataIngestorCSV()
@@ -103,6 +115,9 @@ def data_pipeline(
         logger.info(f"Successfully loaded data with shape: {df.shape}")
         logger.info(f"Columns: {list(df.columns)}")
         logger.info(f"Data types:\n{df.dtypes}")
+        
+        # Store initial metrics for MLflow
+        initial_row_count = len(df)
 
         """
             02. Handling Missing Values
@@ -112,6 +127,7 @@ def data_pipeline(
         logger.info("Checking for missing values...")
         missing_counts = df.isnull().sum()
         missing_summary = missing_counts[missing_counts > 0]
+        total_missing_values = missing_counts.sum()
         
         if len(missing_summary) > 0:
             logger.warning(f"Found missing values:\n{missing_summary}")
@@ -122,6 +138,9 @@ def data_pipeline(
         df = drop_handler.handle(df)
         logger.info(f"Data shape after handling missing values: {df.shape}")
         
+        # Track rows removed due to missing values
+        rows_after_missing_handling = len(df)
+        
         """
             03. Handle Outliers
         """
@@ -131,6 +150,10 @@ def data_pipeline(
         outlier_detector = OutlierDetector(strategy=IQROutlierDetection())
         df = outlier_detector.handle_outliers(df, columns['outlier_columns'])
         logger.info(f"Data shape after outlier handling: {df.shape}")
+        
+        # Track rows removed due to outliers
+        rows_after_outlier_handling = len(df)
+        outliers_removed = rows_after_missing_handling - rows_after_outlier_handling
 
         """
             04. Feature Binning
@@ -191,30 +214,44 @@ def data_pipeline(
 
         # Save the split datasets
         logger.info("Saving split datasets to artifacts directory...")
+        os.makedirs(artifacts_dir, exist_ok=True)
         X_train.to_csv(x_train_path, index=False)
         X_test.to_csv(x_test_path, index=False)
         Y_train.to_csv(y_train_path, index=False)
         Y_test.to_csv(y_test_path, index=False)
 
-        comprehensive_metrics = {
-            'total_samples': X_train.count() + X_test.count(),
-            'train_samples': X_train.count(),
-            'test_samples': X_test.count(),
-            'final_features': len(X_train.columns)
+        # Log comprehensive metrics to MLflow using the correct format
+        dataset_info = {
+            'total_rows': len(X_train) + len(X_test),
+            'train_rows': len(X_train),
+            'test_rows': len(X_test),
+            'num_features': len(X_train.columns),
+            'missing_values': int(total_missing_values),
+            'outliers_removed': outliers_removed,
+            'test_size': splitting_config['test_size'],
+            'random_state': 42,
+            'missing_strategy': 'drop',
+            'outlier_method': 'iqr',
+            'encoding_applied': True,
+            'scaling_applied': True,
+            'feature_names': list(X_train.columns)
         }
 
-        mlflow_tracker.log_data_pipeline_metrics(comprehensive_metrics)
+        mlflow_tracker.log_data_pipeline_metrics(dataset_info)
 
+        # Log additional pipeline parameters
         mlflow.log_params({
-            'final_feature_names': X_train.columns,
-            'preprocessing_steps': ['missing_values', 'outlier_detection', 'feature_binning', 
+            'data_source': data_path,
+            'target_column': target_column,
+            'preprocessing_steps': ['data_ingestion', 'missing_values', 'outlier_detection', 'feature_binning', 
                                   'feature_encoding', 'feature_scaling', 'post_processing', 'data_splitting'],
-            'data_pipeline_version': '1.0_pandas'
+            'data_pipeline_version': '1.0_pandas',
+            'force_rebuild': force_rebuild
         })
 
         mlflow_tracker.end_run()
-
-
+        
+        # Add missing return statement
         logger.info("Data splitting completed successfully:")
         logger.info(f"  - X_train shape: {X_train.shape}")
         logger.info(f"  - X_test shape: {X_test.shape}")
@@ -222,6 +259,13 @@ def data_pipeline(
         logger.info(f"  - Y_test shape: {Y_test.shape}")
         
         ProjectLogger.log_success_header(logger, "DATA PIPELINE EXECUTION COMPLETED SUCCESSFULLY")
+        
+        return {
+            'X_train': X_train.values,
+            'X_test': X_test.values,
+            'Y_train': Y_train.values.ravel(),
+            'Y_test': Y_test.values.ravel()
+        }
         
     except Exception as e:
         logger.error(f"Error in data pipeline execution: {str(e)}")
@@ -231,5 +275,14 @@ def data_pipeline(
         raise
 
 if __name__ == "__main__":
-    data_pipeline()
-    logger.info("Data pipeline completed successfully")
+    try:
+        result = data_pipeline()
+        logger.info("Data pipeline completed successfully")
+        logger.info(f"Returned data shapes:")
+        logger.info(f"  - X_train: {result['X_train'].shape}")
+        logger.info(f"  - X_test: {result['X_test'].shape}")
+        logger.info(f"  - Y_train: {result['Y_train'].shape}")
+        logger.info(f"  - Y_test: {result['Y_test'].shape}")
+    except Exception as e:
+        logger.error(f"Data pipeline execution failed: {str(e)}")
+        raise
