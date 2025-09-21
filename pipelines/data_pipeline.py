@@ -3,6 +3,7 @@ import sys
 import pandas as pd
 from typing import Dict
 import numpy as np
+import mlflow
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
 from data_ingestion import DataIngestorCSV
@@ -83,7 +84,7 @@ def data_pipeline(
             logger.info(f"  - X_test shape: {X_test.shape}")
             logger.info(f"  - Y_train shape: {Y_train.shape}")
             logger.info(f"  - Y_test shape: {Y_test.shape}")
-            
+
             mlflow_tracker.log_data_pipeline_metrics({
                                                     'total_samples': len(X_train) + len(X_test),
                                                     'train_samples': len(X_train),
@@ -195,6 +196,25 @@ def data_pipeline(
         Y_train.to_csv(y_train_path, index=False)
         Y_test.to_csv(y_test_path, index=False)
 
+        comprehensive_metrics = {
+            'total_samples': X_train.count() + X_test.count(),
+            'train_samples': X_train.count(),
+            'test_samples': X_test.count(),
+            'final_features': len(X_train.columns)
+        }
+
+        mlflow_tracker.log_data_pipeline_metrics(comprehensive_metrics)
+
+        mlflow.log_params({
+            'final_feature_names': X_train.columns,
+            'preprocessing_steps': ['missing_values', 'outlier_detection', 'feature_binning', 
+                                  'feature_encoding', 'feature_scaling', 'post_processing', 'data_splitting'],
+            'data_pipeline_version': '1.0_pandas'
+        })
+
+        mlflow_tracker.end_run()
+
+
         logger.info("Data splitting completed successfully:")
         logger.info(f"  - X_train shape: {X_train.shape}")
         logger.info(f"  - X_test shape: {X_test.shape}")
@@ -206,6 +226,8 @@ def data_pipeline(
     except Exception as e:
         logger.error(f"Error in data pipeline execution: {str(e)}")
         logger.error("Pipeline execution failed", exc_info=True)
+        if 'mlflow_tracker' in locals(): # locals() -> returns a dictionary of the current local variables
+            mlflow_tracker.end_run()
         raise
 
 if __name__ == "__main__":
