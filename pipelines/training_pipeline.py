@@ -171,8 +171,6 @@ def training_pipeline(
         
         logger.info("Initializing model evaluator...")
         evaluator = ModelEvaluator(model, 'XGBoost')
-        
-        logger.info("Evaluating model performance...")
         eval_results = evaluator.evaluate(X_test, Y_test)
         
         # Log evaluation results
@@ -187,14 +185,25 @@ def training_pipeline(
         })
 
         model_config = get_model_config()['model_params']
+        
+        training_metrics = {
+            "num_features": X_train.shape[1],
+            "train_samples": len(X_train),
+            "test_samples": len(X_test),
+            "train_class_0": (Y_train == 0).sum().iloc[0],
+            "train_class_1": (Y_train == 1).sum().iloc[0],
+            "test_class_0": (Y_test == 0).sum().iloc[0],
+            "test_class_1": (Y_test == 1).sum().iloc[0],
+        }
+
         mlflow_tracker.log_training_metrics(
                                             model, 
-                                            eval_result_copy, 
-                                            model_config, 
+                                            training_metrics=training_metrics,
+                                            model_params=model_config,
                                             X_train=X_train, Y_train=Y_train, 
                                             X_test=X_test,
                                             )
-
+        
         # Log training summary
         training_summary = {
             'model_type': 'XGboost',
@@ -203,10 +212,9 @@ def training_pipeline(
             'features_used': X_train.shape[1],
             'training_time': training_time,
             'model_path': model_path,
-            'performance_metrics': eval_result_copy,
             'timestamp': pd.Timestamp.now().isoformat(),
         }
-        
+
         # Save training summary
         summary_path = os.path.join(run_artifacts_dir, 'training_summary.json')
         with open(summary_path, 'w') as f:
@@ -220,6 +228,15 @@ def training_pipeline(
                 logger.info(f"  - {metric}: {value:.4f}")
             else:
                 logger.info(f"  - {metric}: {value}")
+
+        logger.info("logging evaluation metrics to MLflow")
+        eval_metrics = {
+            'metrics': eval_result_copy
+        }
+        logger.info(f"logging evaluation metrics to MLflow {eval_metrics}")
+        mlflow_tracker.log_evaluation_metrics(eval_metrics)
+        
+        mlflow_tracker.end_run()
         
         # Step 7: Training completion
         ProjectLogger.log_success_header(logger, "TRAINING PIPELINE COMPLETED SUCCESSFULLY")

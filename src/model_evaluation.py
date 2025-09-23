@@ -43,7 +43,7 @@ class ModelEvaluator:
         self, 
         X_test,
         Y_test,
-    ) :
+    ) -> dict:
         """
         Comprehensive model evaluation.
         
@@ -92,17 +92,19 @@ class ModelEvaluator:
             logger.info("Confusion Matrix:")
             logger.info(f"  {cm}")
 
-            self.evaluation_result = {
-                                    'cm': cm,
-                                    'accuracy': accuracy,
-                                    'precision': precision,
-                                    'recall': recall,
-                                    'f1': f1
-                                }
-
+            # Store results in the correct instance variable
+            self.evaluation_results = {
+                'cm': cm,
+                'accuracy': float(accuracy),      
+                'precision': float(precision),
+                'recall': float(recall),
+                'f1_score': float(f1),
+            }
             
             ProjectLogger.log_success_header(logger, "MODEL EVALUATION COMPLETED")
+            logger.info(f"Evaluation results stored with {len(self.evaluation_results)} metrics")
             
+            # Return the evaluation results
             return self.evaluation_results
             
         except ValueError as e:

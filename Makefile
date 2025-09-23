@@ -81,6 +81,11 @@ mlflow-ui:
 	@echo "Press Ctrl+C to stop the server"
 	@source $(VENV) && mlflow ui --host 0.0.0.0 --port $(MLFLOW_PORT)
 
+mlflow-clean:
+	@echo "Cleaning up MLflow artifacts..."
+	rm -rf mlruns
+	@echo "MLflow artifacts cleaned!"
+
 # Stop all running MLflow servers
 stop-all:
 	@echo "Stopping all MLflow servers..."
