@@ -1,0 +1,14 @@
+{
+  "model_type": "XGboost",
+  "training_samples": 5634,
+  "test_samples": 1409,
+  "features_used": 19,
+  "training_time": 0.2195420265197754,
+  "model_path": "artifacts/models/telco_customer_churn_prediction.joblib",
+  "performance_metrics": {
+    "training_time_seconds": 0.2195420265197754,
+    "model_complexity": 100,
+    "max_depth": 10
+  },
+  "timestamp": "2025-09-23T20:09:19.454312"
+}
