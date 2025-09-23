@@ -2,6 +2,8 @@ import os
 import logging
 import mlflow
 import mlflow.sklearn
+from mlflow.data.pandas_dataset import PandasDataset
+from mlflow.data.pandas_dataset import from_pandas
 from typing import Dict, Any, Optional, Union
 from datetime import datetime
 import pandas as pd
@@ -97,27 +99,148 @@ class MLflowTracker:
         except Exception as e:
             logger.error(f"Error logging data pipeline metrics: {e}")
     
-    def log_training_metrics(self, model, training_metrics: Dict[str, Any], model_params: Dict[str, Any]):
-        """Log training metrics, parameters, and model artifacts"""
+    def log_training_metrics(
+            self, 
+            model, 
+            training_metrics: Dict[str, Any], 
+            model_params: Dict[str, Any],
+            X_train=None, 
+            Y_train=None, 
+            X_test=None, 
+            dataset_name: str = None,
+            ):
+        """
+        Log comprehensive training metrics, parameters, model artifacts, and training dataset to MLflow.
+        
+        Args:
+            model: Trained machine learning model
+            training_metrics: Dictionary of training performance metrics
+            model_params: Model hyperparameters and configuration
+            X_train: Training features
+            Y_train: Training target variable
+            X_test: Test features for signature inference
+            dataset_name: Name for the training dataset in MLflow
+        """
+        logger.info("Starting comprehensive training metrics logging to MLflow")
+        
         try:
-            # Log model parameters
+
+            # Step 1: Log model parameters
             mlflow.log_params(model_params)
-            
-            # Log training metrics
+
+            # Step 2: Log training metrics
             mlflow.log_metrics(training_metrics)
+
+            # Step 3: Log training dataset
+            if X_train is not None and Y_train is not None:
+                try:
+                    if hasattr(X_train, 'to_pandas'):  # Already a DataFrame
+                        train_df = X_train.copy()
+                    elif hasattr(X_train, 'values'):  # DataFrame with values attribute
+                        train_df = X_train.copy()
+                    else: 
+                        train_df = pd.DataFrame(X_train)
+
+                    # Add target variable to the training DataFrame
+                    if hasattr(Y_train, 'values'):
+                        if hasattr(Y_train.values, 'ravel'):
+                            train_df['target'] = Y_train.values.ravel()
+                        else:
+                            train_df['target'] = Y_train.values
+                    elif hasattr(Y_train, 'ravel'):
+                        train_df['target'] = Y_train.ravel()
+                    else:
+                        train_df['target'] = Y_train
+
+                    # Generate dataset name if not provided
+                    if dataset_name is None:
+                        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                        dataset_name = f"telco_churn_training_data_{timestamp}"
+                    
+                    # Create MLflow dataset object
+                    logger.debug("Creating MLflow dataset object...")
+                    dataset = from_pandas(
+                        train_df, 
+                        source="training_pipeline",
+                        name=dataset_name
+                    )
+
+                    # Log the dataset to MLflow
+                    mlflow.log_input(dataset, context="training")
+                    logger.info(f"Successfully logged training dataset: {dataset_name}")
+                    
+                except Exception as dataset_error:
+                    logger.error(f"Failed to log training dataset: {str(dataset_error)}")
+                    logger.warning("Continuing without dataset logging...")
+            else:
+                logger.warning("Training data not provided - skipping dataset logging")
+
+            # Step 4: Create model signature
+            signature = None
+            if X_test is not None:
+                try:
+                    from mlflow.models.signature import infer_signature
+                    
+                    # Use a small sample for signature inference
+                    sample_size = min(5, len(X_test)) if hasattr(X_test, '__len__') else 5
+                    X_sample = X_test[:sample_size] if hasattr(X_test, '__getitem__') else X_test
+                    sample_predictions = model.predict(X_sample)
+                    signature = infer_signature(X_sample, sample_predictions)
+                    
+                except Exception as sig_error:
+                    logger.warning(f"Failed to create model signature: {str(sig_error)}")
+                    logger.warning("Model will be logged without signature")
+            else:
+                logger.info("Test data not provided - skipping signature creation")
+
+            # Step 5: Log the trained model
+            logger.info("Logging trained model to MLflow...")
+            try:
+                artifact_path = self.config.get('artifact_path', 'model')
+                model_registry_name = self.config.get('model_registry_name', 'churn_prediction_model')
+                
+                try:
+                    mlflow.xgboost.log_model(
+                                xgb_model=model,
+                                artifact_path=artifact_path,
+                                signature=signature,
+                                registered_model_name=model_registry_name,
+                            )
+                    logger.info("Model logged as XGBoost model")
+                except Exception:
+                    mlflow.sklearn.log_model(
+                            sk_model=model,
+                            artifact_path=artifact_path,
+                            signature=signature,
+                            registered_model_name=model_registry_name
+                            )
+                    logger.info("Model logged as scikit-learn model")
+                
+            except Exception as model_error:
+                logger.error(f"Failed to log model: {str(model_error)}")
+                raise
             
-            # Log the model
-            artifact_path = self.config.get('artifact_path', 'model')
-            mlflow.sklearn.log_model(
-                sk_model=model,
-                artifact_path=artifact_path,
-                registered_model_name=self.config.get('model_registry_name', 'churn_prediction_model')
-            )
+            # Step 6: Log additional model metadata
+            try:
+                model_metadata = {
+                    'model_type': type(model).__name__,
+                    'model_framework': 'scikit-learn' if hasattr(model, 'fit') else 'unknown',
+                    'has_predict_proba': hasattr(model, 'predict_proba'),
+                    'training_timestamp': datetime.now().isoformat()
+                }
+                
+                mlflow.log_params(model_metadata)
+                logger.info("Successfully logged model metadata")
+                
+            except Exception as metadata_error:
+                logger.warning(f"Failed to log model metadata: {str(metadata_error)}")
             
-            logger.info("Logged training metrics and model to MLflow")
+            logger.info("Training metrics logging completed successfully")
             
         except Exception as e:
-            logger.error(f"Error logging training metrics: {e}")
+            logger.error(f"Critical error in log_training_metrics: {str(e)}")
+            logger.error("Training metrics logging failed", exc_info=True)
+            raise
     
     def log_evaluation_metrics(self, evaluation_metrics: Dict[str, Any], confusion_matrix_path: Optional[str] = None):
         """Log evaluation metrics and artifacts"""

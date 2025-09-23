@@ -187,7 +187,13 @@ def training_pipeline(
         })
 
         model_config = get_model_config()['model_params']
-        mlflow_tracker.log_training_metrics(model, eval_result_copy, model_config)
+        mlflow_tracker.log_training_metrics(
+                                            model, 
+                                            eval_result_copy, 
+                                            model_config, 
+                                            X_train=X_train, Y_train=Y_train, 
+                                            X_test=X_test,
+                                            )
 
         # Log training summary
         training_summary = {
