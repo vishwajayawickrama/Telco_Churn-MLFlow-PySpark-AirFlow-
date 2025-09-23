@@ -155,48 +155,7 @@ def training_pipeline(
         
         logger.info(f"Saving trained model to: {model_path}")
         trainer.save_model(model, model_path)
-
-                
-        # ENHANCED MLFLOW MODEL LOGGING
-        try:
-            logger.info("Logging model to MLflow with proper model registry...")
-                    
-            # Create model signature for input/output schema
-            from mlflow.models.signature import infer_signature
-                    
-            # Generate sample predictions for signature
-            sample_predictions = model.predict(X_test.head(5))
-            signature = infer_signature(X_test.head(5), sample_predictions)
-                    
-            # Log model with MLflow (choose appropriate based on your model type)
-            if hasattr(model, 'predict_proba'):  # XGBoost/RandomForest
-                mlflow.xgboost.log_model(
-                        model,
-                        artifact_path="01_XGBoost_model",
-                        signature=signature,
-                        registered_model_name="telco_customer_churn_xgboost",
-                        input_example=X_test.head(3).to_dict('records')[0]
-                        )
-            else:
-                mlflow.sklearn.log_model(
-                        model,
-                        artifact_path="01_Sklearn_model", 
-                        signature=signature,
-                        registered_model_name="telco_customer_churn_model",
-                        input_example=X_test.head(3).to_dict('records')[0]
-                    )
-                    
-            logger.info("Model successfully logged to MLflow Model Registry")
-                    
-            # Log model metadata
-            mlflow.log_param("model_framework", "XGBoost")
-            mlflow.log_param("model_version", "1.0")
-            mlflow.log_param("model_type", "binary_classifier")
-            mlflow.log_param("target_classes", ["No Churn", "Churn"])
-                    
-        except Exception as e:
-            logger.warning(f"Failed to log model to MLflow Model Registry: {str(e)}")
-            logger.info("Falling back to basic artifact logging...")
+        mlflow.log_artifact(model_path, "01_XGBoost_model")
                     
 
         

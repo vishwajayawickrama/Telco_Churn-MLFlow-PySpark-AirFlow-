@@ -159,7 +159,7 @@ mlflow:
   tracking_uri: "file:./mlruns"  # Local file-based tracking
   experiment_name: "Telco Customer Churn Analysis"
   model_registry_name: "telco_customer_churn_prediction"
-  artifact_path: "model"
+  artifact_path: "TelcoCustomerChurnModel"
   run_name_prefix: "churn_run"
   tags:
     project: "telco_customer_churn_prediction"
