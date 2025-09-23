@@ -68,7 +68,7 @@ class MLflowTracker:
         return run
     
     def log_data_pipeline_metrics(self, dataset_info: Dict[str, Any]):
-        """Log data pipeline metrics and artifacts"""
+        """Log data pipeline metrics, parameters, and dataset artifacts to MLflow"""
         try:
             # Log dataset metrics (Metrics = Things in dataset that can be measured numerically)
             mlflow.log_metrics({
@@ -94,10 +94,92 @@ class MLflowTracker:
             if 'feature_names' in dataset_info:
                 mlflow.log_param('feature_names', str(dataset_info['feature_names']))
             
-            logger.info("Logged data pipeline metrics to MLflow")
+            # Log dataset to MLflow if dataset is provided
+            if 'processed_dataset' in dataset_info and dataset_info['processed_dataset'] is not None:
+                logger.info("Logging processed dataset to MLflow...")
+                try:
+                    dataset = dataset_info['processed_dataset']
+                    
+                    # Convert to DataFrame if needed
+                    if hasattr(dataset, 'to_pandas'):
+                        dataset_df = dataset.copy()
+                        logger.debug("Dataset is already a DataFrame")
+                    elif hasattr(dataset, 'values'):
+                        dataset_df = dataset.copy()
+                        logger.debug("Dataset converted from DataFrame with values")
+                    else:
+                        dataset_df = pd.DataFrame(dataset)
+                        logger.debug("Dataset converted from array-like structure")
+                    
+                    # Generate dataset name with timestamp
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    dataset_name = dataset_info.get('dataset_name', f"telco_churn_processed_data_{timestamp}")
+                    
+                    # Create MLflow dataset object
+                    mlflow_dataset = from_pandas(
+                        dataset_df,
+                        source=dataset_info.get('source', 'data_pipeline'),
+                        name=dataset_name
+                    )
+                    
+                    # Log the dataset with context
+                    context = dataset_info.get('context', 'data_preprocessing')
+                    mlflow.log_input(mlflow_dataset, context=context)
+                    
+                    logger.info(f"Successfully logged dataset '{dataset_name}' to MLflow")
+                    logger.info(f"Dataset shape: {dataset_df.shape}")
+                    
+                except Exception as dataset_error:
+                    logger.error(f"Failed to log dataset to MLflow: {str(dataset_error)}")
+                    logger.warning("Continuing data pipeline metrics logging without dataset...")
+            else:
+                logger.info("No processed dataset provided - skipping dataset logging")
+            
+            # Log training and test datasets separately if provided
+            if 'X_train' in dataset_info and 'Y_train' in dataset_info:
+                logger.info("Logging training dataset to MLflow...")
+                try:
+                    X_train = dataset_info['X_train']
+                    Y_train = dataset_info['Y_train']
+                    
+                    # Convert to DataFrame format
+                    if hasattr(X_train, 'copy'):
+                        train_df = X_train.copy()
+                    else:
+                        train_df = pd.DataFrame(X_train)
+                    
+                    # Add target variable
+                    if hasattr(Y_train, 'values'):
+                        if hasattr(Y_train.values, 'ravel'):
+                            train_df['target'] = Y_train.values.ravel()
+                        else:
+                            train_df['target'] = Y_train.values
+                    elif hasattr(Y_train, 'ravel'):
+                        train_df['target'] = Y_train.ravel()
+                    else:
+                        train_df['target'] = Y_train
+                    
+                    # Generate training dataset name
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    train_dataset_name = f"telco_churn_training_split_{timestamp}"
+                    
+                    # Create and log training dataset
+                    train_dataset = from_pandas(
+                        train_df,
+                        source="data_pipeline_training_split",
+                        name=train_dataset_name
+                    )
+                    
+                    mlflow.log_input(train_dataset, context="training_split")
+                    logger.info(f"Successfully logged training dataset: {train_dataset_name}")
+                    
+                except Exception as train_error:
+                    logger.error(f"Failed to log training dataset: {str(train_error)}")
+            
             
         except Exception as e:
             logger.error(f"Error logging data pipeline metrics: {e}")
+            logger.error("Data pipeline metrics logging failed", exc_info=True)
     
     def log_training_metrics(
             self, 

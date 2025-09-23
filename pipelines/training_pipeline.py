@@ -204,7 +204,9 @@ def training_pipeline(
             'training_time': training_time,
             'model_path': model_path,
             'performance_metrics': eval_result_copy,
-            'timestamp': pd.Timestamp.now().isoformat()
+            'timestamp': pd.Timestamp.now().isoformat(),
+            'X_train': X_train,
+            'Y_train': Y_train,
         }
         
         # Save training summary
