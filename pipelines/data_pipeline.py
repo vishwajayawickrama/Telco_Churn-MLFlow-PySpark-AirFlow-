@@ -234,7 +234,9 @@ def data_pipeline(
             'outlier_method': 'iqr',
             'encoding_applied': True,
             'scaling_applied': True,
-            'feature_names': list(X_train.columns)
+            'feature_names': list(X_train.columns),
+            'X_train': X_train,
+            'Y_train': Y_train,
         }
 
         mlflow_tracker.log_data_pipeline_metrics(dataset_info)
