@@ -1,22 +1,19 @@
+import json
 import os
 import sys
+import mlflow
 import pandas as pd
 import pickle
 from data_pipeline import data_pipeline
 from typing import Dict, Any, Tuple, Optional
-
-# Add src and utils to path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
-
-# Import src modules
 from model_building import RandomForestModelBuilder, XGBoostModelBuilder
 from model_training import ModelTrainer
 from model_evaluation import ModelEvaluator
-
-# Import utils
 from config import get_model_config, get_data_paths
 from logger import get_logger, ProjectLogger, log_exceptions
+from mlflow_utils import MLflowTracker, create_mlflow_run_tags
 
 # Initialize logger
 logger = get_logger(__name__)
@@ -53,6 +50,20 @@ def training_pipeline(
         if model_params is None:
             model_params = {}
             logger.info("Using default model parameters")
+
+        mlflow_tracker = MLflowTracker()
+        run_tags = create_mlflow_run_tags(
+                                        'training_pipeline', {
+                                                            'model_type' : 'XGboost',
+                                                            'training_strategy' : 'simple',
+                                                            'data_path': data_path,
+                                                            'model_path': model_path,
+                                                            'processing_engine': 'scikit-learn',
+                                                            }
+                                                            )
+        run = mlflow_tracker.start_run(run_name='01_training_pipeline_sklearn', tags=run_tags)
+        run_artifacts_dir = os.path.join('artifacts', 'mlflow_training_artifacts', run.info.run_id)
+        os.makedirs(run_artifacts_dir, exist_ok=True)
         
         # Step 1: Check and prepare data
         ProjectLogger.log_step_header(logger, "STEP", "1: DATA PREPARATION")
@@ -95,6 +106,18 @@ def training_pipeline(
             raise ValueError(f"Sample mismatch: X_train has {X_train.shape[0]} samples, Y_train has {Y_train.shape[0]}")
             
         logger.info("Data validation completed successfully")
+
+        mlflow.log_metrics({
+                        'train_samples': len(X_train),
+                        'test_samples': len(X_test),
+                        'num_features': X_train.shape[1],
+                        'train_class_0': (Y_train == 0).sum().iloc[0],
+                        'train_class_1': (Y_train == 1).sum().iloc[0],
+                        'test_class_0': (Y_test == 0).sum().iloc[0],
+                        'test_class_1': (Y_test == 1).sum().iloc[0]
+                        })
+        
+        mlflow.log_param('feature_names', list(X_train.columns))
         
         # Step 3: Model building
         ProjectLogger.log_step_header(logger, "STEP", "3: MODEL BUILDING")
@@ -110,13 +133,16 @@ def training_pipeline(
         logger.info("Initializing model trainer...")
         trainer = ModelTrainer()
         
+        import time
         logger.info("Starting model training...")
+        start_time = time.time()
         model, _ = trainer.train(
             model=model,
             X_train=X_train,
             Y_train=Y_train,
         )
-        logger.info("Model training completed successfully")
+        training_time = time.time() - start_time
+        logger.info(f"Model training completed successfully in {training_time:.2f} seconds")
         
         # Step 5: Model saving
         ProjectLogger.log_step_header(logger, "STEP", "5: MODEL SAVING")
@@ -129,6 +155,8 @@ def training_pipeline(
         
         logger.info(f"Saving trained model to: {model_path}")
         trainer.save_model(model, model_path)
+        mlflow.log_artifact(model_path, "trained_models")
+
         
         # Verify model was saved
         if os.path.exists(model_path):
@@ -150,6 +178,34 @@ def training_pipeline(
         eval_result_copy = eval_results.copy()
         if 'cm' in eval_result_copy:
             del eval_result_copy['cm']  # Remove confusion matrix for cleaner logging
+
+        eval_result_copy.update({
+            'training_time_seconds': training_time,
+            'model_complexity': model.n_estimators if hasattr(model, 'n_estimators') else 0,
+            'max_depth': model.max_depth if hasattr(model, 'max_depth') else 0
+        })
+
+        model_config = get_model_config()['model_params']
+        mlflow_tracker.log_training_metrics(model, eval_result_copy, model_config)
+
+        # Log training summary
+        training_summary = {
+            'model_type': 'XGboost',
+            'training_samples': len(X_train),
+            'test_samples': len(X_test),
+            'features_used': X_train.shape[1],
+            'training_time': training_time,
+            'model_path': model_path,
+            'performance_metrics': eval_result_copy,
+            'timestamp': pd.Timestamp.now().isoformat()
+        }
+        
+        # Save training summary
+        summary_path = os.path.join(run_artifacts_dir, 'training_summary.json')
+        with open(summary_path, 'w') as f:
+            json.dump(training_summary, f, indent=2, default=str)
+        
+        mlflow.log_artifact(summary_path, "training_summary")
         
         logger.info("Model evaluation completed:")
         for metric, value in eval_result_copy.items():
