@@ -142,7 +142,7 @@ class DataIngestorExcel(DataIngestor):
             
             # Log successful ingestion details
             ProjectLogger.log_success_header(logger, "EXCEL INGESTION FROM EXCEL COMPLETED SUCCESSFULLY")
-            logger.info(f"✓Shape: ({row_count}, {len(columns)})")
+            logger.info(f"✓ Shape: ({row_count}, {len(columns)})")
             logger.info(f"Columns: {columns}")
             logger.info(f"Partitions: {df.rdd.getNumPartitions()}")
 
