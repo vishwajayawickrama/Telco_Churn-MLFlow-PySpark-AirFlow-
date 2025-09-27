@@ -3,8 +3,11 @@ import sys
 import pandas as pd
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
+from mlflow_utils import MLflowTracker, create_mlflow_run_tags
 from model_inference import ModelInference
 from logger import get_logger, ProjectLogger, log_exceptions
+import mlflow
+import time
 
 # Initialize logger
 logger = get_logger(__name__)
@@ -45,6 +48,18 @@ def streaming_inference(inference, data):
     try:
         logger.info("Starting streaming inference process")
         
+        # Start MLflow tracking
+        mlflow_tracker = MLflowTracker()
+        run_tags = create_mlflow_run_tags(
+                                            'streaming_inference', 
+                                            {
+                                                'inference_type': 'single_record',
+                                                'model_type': 'XGBoost'
+                                            }
+                                        )
+        run = mlflow_tracker.start_run(run_name='streaming_inference', tags=run_tags)
+        logger.info("Inference tracking run started")
+        
         # Validate inputs
         if inference is None:
             raise ValueError("ModelInference instance is None")
@@ -71,10 +86,23 @@ def streaming_inference(inference, data):
         # Perform prediction
         try:
             logger.info("Executing model prediction")
+            start_time = time.time()
+
             pred = inference.predict(data)
-            
+
+            inference_time = time.time() - start_time
+
             if pred is None:
                 raise ValueError("Model prediction returned None")
+            
+                    # Log inference metrics to MLflow
+            mlflow.log_metrics({
+                                'inference_time_ms': inference_time,
+                                'churn_probability': float(pred['Confidence'].replace('%', '')) / 100,
+                                'predicted_class': 1 if pred['Status'] == 'Churn' else 0
+                              })
+            
+            mlflow.log_params({f'input_{k}': v for k, v in data.items()})
             
             logger.info("Model prediction completed successfully")
             logger.debug(f"Prediction result: {pred}")
@@ -95,6 +123,8 @@ def streaming_inference(inference, data):
         ProjectLogger.log_error_header(logger, "STREAMING INFERENCE FAILED")
         logger.error(f"Unexpected error in streaming inference: {str(e)}")
         raise
+    finally:
+        mlflow_tracker.end_run()
 
 
 if __name__ == "__main__":
