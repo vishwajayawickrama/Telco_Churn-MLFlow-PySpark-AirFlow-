@@ -200,12 +200,15 @@ def check_missing_values(df: DataFrame) -> Dict[str, int]:
     try:
         missing_counts = {}
         
+        # Get column data types as a dict: {col_name: data_type}
+        col_types = dict(df.dtypes)
         for col in df.columns:
-            missing_count = df.filter(
-                F.col(col).isNull() | 
-                F.isnan(col) | 
-                (F.col(col) == "")
-            ).count()
+            # Only apply F.isnan to float/double columns
+            dtype = col_types[col].lower()
+            cond = F.col(col).isNull() | (F.col(col) == "")
+            if dtype in ("float", "double"):
+                cond = cond | F.isnan(col)
+            missing_count = df.filter(cond).count()
             missing_counts[col] = missing_count
         
         total_missing = sum(missing_counts.values())
