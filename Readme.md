@@ -1,4 +1,4 @@
-# Telco Customer Churn Prediction - Pandas & Scikit Learn Version
+# Telco Customer Churn Prediction - pyspark Version
 
 A comprehensive machine learning project to predict customer churn for a telecommunications company using advanced data pipelines and multiple ML algorithms.
 
