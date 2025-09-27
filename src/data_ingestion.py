@@ -5,15 +5,25 @@ from abc import ABC, abstractmethod
 from typing import Optional
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
 from logger import get_logger, ProjectLogger, log_exceptions
+from pyspark.sql import DataFrame, SparkSession
+from spark_session import get_or_create_spark_session
 
 logger = get_logger(__name__)
 
 
 class DataIngestor(ABC):
-    """ Abstract base class for data ingestion strategies. """
+    """ Abstract base class for data ingestion strategies using pyspark. """
+    def __init__(self, spark: Optional[SparkSession] = None):
+        """
+        Initialize DataIngestor with a SparkSession.
+        
+        Args:
+            spark: Optional SparkSession. If not provided, will create/get one.
+        """
+        self.spark = spark or get_or_create_spark_session()
     
     @abstractmethod
-    def ingest(self, file_path_or_link: str) -> pd.DataFrame:
+    def ingest(self, file_path_or_link: str) -> DataFrame:
         """
         Abstract method to ingest data from a given source.
         
@@ -21,7 +31,7 @@ class DataIngestor(ABC):
             file_path_or_link (str): Path to the data file or URL
             
         Returns:
-            pd.DataFrame: The ingested data as a pandas DataFrame
+            DataFrame: The ingested data as a PySpark DataFrame
         """
         pass
 
@@ -29,65 +39,65 @@ class DataIngestor(ABC):
 class DataIngestorCSV(DataIngestor):
     """ CSV file data ingestor implementation. """
     
-    def ingest(self, file_path_or_link: str) -> pd.DataFrame:
+    def ingest(self, file_path_or_link: str, **options) -> DataFrame:
         """
         Ingest data from a CSV file.
         
         Args:
             file_path_or_link (str): Path to the CSV file or URL
+            **options: Additional options for CSV reading
             
         Returns:
-            pd.DataFrame: The ingested data as a pandas DataFrame
+            DataFrame: The ingested data as a PySpark DataFrame
 
         """
         ProjectLogger.log_step_header(logger, "STEP", f"STARTING CSV INGESTION FROM: {file_path_or_link}")
         
         try:
+            # Default CSV options
+            csv_options = {
+                "header": "true", # First row as header
+                "inferSchema": "true", # Infer data types
+                "ignoreLeadingWhiteSpace": "true", # Ignore leading whitespace
+                "ignoreTrailingWhiteSpace": "true", # Ignore trailing whitespace
+                "nullValue": "", # Treat empty strings as null
+                "nanValue": "NaN", # Treat 'NaN' as null
+                "escape": '"', # Escape character
+                "quote": '"' # Quote character
+            }
+            csv_options.update(options)
+
             # Read the CSV file
-            logger.debug("Reading CSV file")
-            df = pd.read_csv(file_path_or_link)
+            logger.info("Reading CSV file")
+            df = self.spark.read.options(**csv_options).csv(file_path_or_link)
             
-            # Validate the loaded data
-            if df.empty:
-                logger.warning(f"Loaded DataFrame is empty from: {file_path_or_link}")
-                raise pd.errors.EmptyDataError("The CSV file contains no data")
+            # Get DataFrame info
+            row_count = df.count()
+            columns = df.columns
+            
+            # Calculate approximate memory usage
+            # Note: This is an estimate as PySpark distributes data
+            sample_size = min(1000, row_count)
+            if row_count > 0:
+                sample_df = df.limit(sample_size).toPandas()
+                memory_per_row = sample_df.memory_usage(deep=True).sum() / sample_size
+                estimated_memory = (memory_per_row * row_count) / 1024**2
+            else:
+                estimated_memory = 0
             
             # Log successful ingestion details
             ProjectLogger.log_success_header(logger, "CSV INGESTION COMPLETED SUCCESSFULLY")
             logger.info(f"Data Summary:")
-            logger.info(f"  - Shape: {df.shape}")
-            logger.info(f"  - Columns: {list(df.columns)}")
-            logger.info(f"  - Memory usage: {df.memory_usage(deep=True).sum() / 1024 / 1024:.2f} MB")
-            
-            # Log data quality summary
-            logger.info(f"Data Quality Summary:")
-            logger.info(f"  - Missing values: {df.isnull().sum().sum()}")
-            logger.info(f"  - Duplicate rows: {df.duplicated().sum()}")
-            logger.info(f"  - Data types: {df.dtypes.value_counts().to_dict()}")
-            ProjectLogger.log_success_header(logger, "CSV INGESTION SUMMARY COMPLETE")
-            
+            logger.info(f"Shape: ({row_count}, {len(columns)})")
+            logger.info(f"Columns: {columns}")
+            logger.info(f"Estimated memory usage: {estimated_memory:.2f} MB")
+            logger.info(f"Partitions: {df.rdd.getNumPartitions()}")
+
             return df
             
         except FileNotFoundError as e:
             ProjectLogger.log_error_header(logger, "CSV INGESTION FAILED - FILE NOT FOUND")
             logger.error(f"File not found error: {str(e)}")
-            raise
-        except pd.errors.EmptyDataError as e:
-            ProjectLogger.log_error_header(logger, "CSV INGESTION FAILED - EMPTY DATA")
-            logger.error(f"Empty data error: {str(e)}")
-            raise
-        except pd.errors.ParserError as e:
-            ProjectLogger.log_error_header(logger, "CSV INGESTION FAILED - PARSING ERROR")
-            logger.error(f"CSV parsing error: {str(e)}")
-            raise
-        except PermissionError as e:
-            ProjectLogger.log_error_header(logger, "CSV INGESTION FAILED - PERMISSION DENIED")
-            logger.error(f"Permission denied accessing file: {str(e)}")
-            raise
-        except UnicodeDecodeError as e:
-            ProjectLogger.log_error_header(logger, "CSV INGESTION FAILED - ENCODING ERROR")
-            logger.error(f"Encoding error while reading CSV: {str(e)}")
-            logger.info("Try specifying encoding parameter (e.g., encoding='utf-8', 'latin-1', etc.)")
             raise
         except Exception as e:
             ProjectLogger.log_error_header(logger, "CSV INGESTION FAILED - UNEXPECTED ERROR")
@@ -98,67 +108,49 @@ class DataIngestorCSV(DataIngestor):
 class DataIngestorExcel(DataIngestor):
     """ Excel file data ingestor implementation. """
     
-    def ingest(self, file_path_or_link: str) -> pd.DataFrame:
+    def ingest(self, file_path_or_link: str, sheet_name: Optional[str] = None, **options) -> DataFrame:
         """
-        Ingest data from an Excel file.
+        Ingest Excel data using PySpark.
+        Note: This implementation converts Excel to CSV format internally as PySpark
+        doesn't have native Excel support. For production use, consider using
+        spark-excel library.
         
         Args:
             file_path_or_link (str): Path to the Excel file or URL
+            sheet_name: Name of the sheet to read (optional)
+            **options: Additional options
             
         Returns:
-            pd.DataFrame: The ingested data as a pandas DataFrame
-            
+            DataFrame: The ingested data as a PySpark DataFrame
         """
         ProjectLogger.log_step_header(logger, "STEP", f"STARTING EXCEL INGESTION FROM: {file_path_or_link}")
         
         try:
-            # Check file extension for local files
-            if not file_path_or_link.startswith(('http://', 'https://', 'ftp://')):
-                file_ext = os.path.splitext(file_path_or_link)[1].lower()
-                if file_ext not in ['.xlsx', '.xls']:
-                    logger.warning(f"Unexpected file extension: {file_ext}")
+
             
             # Read the Excel file
             logger.debug("Reading Excel file")
-            df = pd.read_excel(file_path_or_link)
+            pandas_df = pd.read_excel(file_path_or_link, sheet_name=sheet_name)
+
+            # Convert to PySpark DataFrame
+            logger.debug("Converting to PySpark DataFrame")
+            df = self.spark.createDataFrame(pandas_df)
             
-            # Validate the loaded data
-            if df.empty:
-                logger.warning(f"Loaded DataFrame is empty from: {file_path_or_link}")
-                raise ValueError("The Excel file contains no data")
+            # Get DataFrame info
+            row_count = df.count()
+            columns = df.columns
             
             # Log successful ingestion details
             ProjectLogger.log_success_header(logger, "EXCEL INGESTION COMPLETED SUCCESSFULLY")
-            logger.info(f"Data Summary:")
-            logger.info(f"  - Shape: {df.shape}")
-            logger.info(f"  - Columns: {list(df.columns)}")
-            logger.info(f"  - Memory usage: {df.memory_usage(deep=True).sum() / 1024 / 1024:.2f} MB")
-            
-            # Log data quality summary
-            logger.info(f"Data Quality Summary:")
-            logger.info(f"  - Missing values: {df.isnull().sum().sum()}")
-            logger.info(f"  - Duplicate rows: {df.duplicated().sum()}")
-            logger.info(f"  - Data types: {df.dtypes.value_counts().to_dict()}")
-            ProjectLogger.log_success_header(logger, "EXCEL INGESTION SUMMARY COMPLETE")
-            
+            logger.info(f"✓ Shape: ({row_count}, {len(columns)})")
+            logger.info(f"Columns: {columns}")
+            logger.info(f"Partitions: {df.rdd.getNumPartitions()}")
+
             return df
             
         except FileNotFoundError as e:
             ProjectLogger.log_error_header(logger, "EXCEL INGESTION FAILED - FILE NOT FOUND")
             logger.error(f"File not found error: {str(e)}")
-            raise
-        except ValueError as e:
-            ProjectLogger.log_error_header(logger, "EXCEL INGESTION FAILED - VALUE ERROR")
-            logger.error(f"Value error during Excel ingestion: {str(e)}")
-            raise
-        except PermissionError as e:
-            ProjectLogger.log_error_header(logger, "EXCEL INGESTION FAILED - PERMISSION DENIED")
-            logger.error(f"Permission denied accessing file: {str(e)}")
-            raise
-        except ImportError as e:
-            ProjectLogger.log_error_header(logger, "EXCEL INGESTION FAILED - MISSING DEPENDENCY")
-            logger.error(f"Missing dependency for Excel reading: {str(e)}")
-            logger.info("Please install openpyxl or xlrd: pip install openpyxl xlrd")
             raise
         except Exception as e:
             ProjectLogger.log_error_header(logger, "EXCEL INGESTION FAILED - UNEXPECTED ERROR")
