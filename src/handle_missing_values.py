@@ -124,9 +124,11 @@ class FillMissingValuesStrategy(MissingValueHandlingStrategy):
         
         ProjectLogger.log_section_header(logger, "INITIALIZING FILL MISSING VALUES STRATEGY")
         logger.info(f"Fill method: {self.method}")
-        logger.info(f"Fill value: {self.fill_value}") if self.fill_value else None
+        if self.fill_value:
+            logger.info(f"Fill value: {self.fill_value}")
         logger.info(f"Relevant column: {self.relevant_column}")
-        logger.info(f"Using custom imputer: {self.is_custom_imputer}") if self.is_custom_imputer else None
+        if self.is_custom_imputer:
+            logger.info(f"Using custom imputer: {self.is_custom_imputer}")
 
     @log_exceptions(logger)
     def handle(self, df: DataFrame) -> DataFrame:
