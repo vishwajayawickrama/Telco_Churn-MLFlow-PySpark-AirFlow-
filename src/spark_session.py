@@ -1,4 +1,3 @@
-import logging
 from typing import Optional
 from pyspark.sql import SparkSession
 from logger import get_logger
