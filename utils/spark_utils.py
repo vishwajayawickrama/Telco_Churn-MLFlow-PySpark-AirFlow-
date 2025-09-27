@@ -30,7 +30,7 @@ def spark_to_pandas(df: DataFrame, max_records: Optional[int] = None) -> pd.Data
         # Use Arrow optimization if available
         try:
             pandas_df = df.toPandas()
-        except:
+        except Exception:
             # Fallback to regular conversion
             logger.warning("Arrow optimization not available, using standard conversion")
             pandas_df = df.toPandas()
