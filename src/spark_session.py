@@ -50,15 +50,15 @@ def create_spark_session(
         # Set log level to reduce verbosity
         spark.sparkContext.setLogLevel("WARN")
         
-        logger.info(f"✓ SparkSession created/retrieved: {app_name}")
-        logger.info(f"  • Spark Version: {spark.version}")
-        logger.info(f"  • Master: {spark.sparkContext.master}")
-        logger.info(f"  • Default Parallelism: {spark.sparkContext.defaultParallelism}")
+        logger.info(f"SparkSession created/retrieved: {app_name}")
+        logger.info(f"Spark Version: {spark.version}")
+        logger.info(f"Master: {spark.sparkContext.master}")
+        logger.info(f"Default Parallelism: {spark.sparkContext.defaultParallelism}")
         
         return spark
         
     except Exception as e:
-        logger.error(f"✗ Failed to create SparkSession: {str(e)}")
+        logger.error(f"Failed to create SparkSession: {str(e)}")
         raise
 
 
@@ -72,9 +72,9 @@ def stop_spark_session(spark: SparkSession) -> None:
     try:
         if spark and hasattr(spark, 'stop'):
             spark.stop()
-            logger.info("✓ SparkSession stopped successfully")
+            logger.info("SparkSession stopped successfully")
     except Exception as e:
-        logger.error(f"✗ Error stopping SparkSession: {str(e)}")
+        logger.error(f"Error stopping SparkSession: {str(e)}")
 
 
 def get_spark_session_info(spark: SparkSession) -> dict:
@@ -120,11 +120,11 @@ def configure_spark_for_ml(spark: SparkSession) -> SparkSession:
         spark.conf.set("spark.sql.execution.arrow.maxRecordsPerBatch", "10000")
         spark.conf.set("spark.sql.autoBroadcastJoinThreshold", "10485760")  # 10MB
         
-        logger.info("✓ SparkSession configured for ML workloads")
+        logger.info("SparkSession configured for ML workloads")
         return spark
         
     except Exception as e:
-        logger.error(f"✗ Error configuring Spark for ML: {str(e)}")
+        logger.error(f"Error configuring Spark for ML: {str(e)}")
         return spark
 
 
@@ -133,7 +133,7 @@ _global_spark_session = None
 
 
 def get_or_create_spark_session(
-    app_name: str = "ChurnPredictionPipeline",
+    app_name: str = "TelcoCustomerChurnPrediction",
     **kwargs
 ) -> SparkSession:
     """
