@@ -1,8 +1,9 @@
 import logging
 from typing import Optional
 from pyspark.sql import SparkSession
+from logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def create_spark_session(

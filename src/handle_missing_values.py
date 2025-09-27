@@ -4,8 +4,6 @@ import pandas as pd
 from enum import Enum
 from typing import Optional
 from abc import ABC, abstractmethod
-
-# Add utils to path for logger import
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
 from logger import get_logger, ProjectLogger, log_exceptions
 
