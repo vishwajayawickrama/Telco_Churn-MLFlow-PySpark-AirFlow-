@@ -177,12 +177,141 @@ class IQROutlierDetection(OutlierDetectionStrategy):
                 """
                 outlier_count = result_df.filter(F.col(outlier_col)).count()
 
-                # TODO: continue from here
-            
-            return outliers
+                total_rows = result_df.count()
+
+                outlier_percentage = (outlier_count / total_rows * 100) if total_rows > 0 else 0
+                logger.info(f"  ✓ Found {outlier_count} outliers ({outlier_percentage:.2f}%)")
+                total_outliers += outlier_count
+
+                ProjectLogger.log_success_header(logger, f"OUTLIER DETECTION FOR COLUMN '{col}' COMPLETED")
+
+            ProjectLogger.log_success_header(logger, "OUTLIER DETECTION FOR ALL COLUMNS COMPLETED")
+            return result_df
             
         except Exception as e:
             ProjectLogger.log_error_header(logger, "UNEXPECTED ERROR IN OUTLIER DETECTION")
             logger.error(f"Unexpected error: {str(e)}")
             raise
 
+class OutlierDetector:
+    """Main outlier detector class that uses different strategies."""
+
+    def __init__(self, strategy: OutlierDetectionStrategy):
+        """
+        Initialize outlier detector with a specific strategy.
+        
+        Args:
+            strategy: OutlierDetectionStrategy instance
+        """
+        self.strategy = strategy
+
+    def detect_outliers(self, df: DataFrame, selected_columns: List[str]) -> DataFrame:
+            """
+            Detect outliers in specified columns using the chosen strategy.
+            
+            Args:
+                df (DataFrame): Input DataFrame
+                selected_columns (List[str]): List of columns to check for outliers
+
+            Returns:
+                DataFrame: DataFrame with outlier information
+            """
+            return self._strategy.detect_outliers(df, selected_columns)
+
+    def handle_outliers(self, df: DataFrame, selected_columns: List[str], 
+                        method: str = 'remove', min_outliers: int = 2) -> DataFrame:
+        """
+        Handle outliers in specified columns using specified method.
+        
+        Args:
+            df: DataFrame (PySpark or pandas)
+            selected_columns: List of column names to check
+            method: Method to handle outliers ('remove' or 'cap')
+            min_outliers: Minimum number of outlier columns to remove a row
+
+        Returns:
+            DataFrame: DataFrame with outliers handled
+        """
+        ProjectLogger.log_step_header(logger, "STEP", f"HANDLING OUTLIERS USING METHOD: {method.upper()}")
+
+        try:
+            initial_rows = df.count()
+
+            if self.method == 'remove':
+                # Add outlier indicator columns
+                df_with_outliers = self.detect_outliers(df, selected_columns)
+
+                # Count outliers per row
+                outlier_columns = [f"{col}_outlier" for col in selected_columns]
+
+                """
+                    cast: - is a method in PySpark's Column class that allows you to convert the data type of a column
+                                to a different data type. It is commonly used when you need to change the type of
+                                a column for various operations, such as filtering, aggregations, or transformations.
+                    col.cast(dataType)
+                    Parameters:
+                        - dataType: The target data type to which you want to convert the column.  
+                    however, in this case we are using it to convert boolean to integer (True to 1 and False to 0) 
+                """
+                """
+                    sum: - is a function in PySpark's functions module that calculates the sum of values in a column or 
+                            expression across all rows in a DataFrame. It is commonly used in aggregation operations 
+                            to compute the total or sum of numeric values.
+                    sum(expr)
+                    Parameters:
+                        - expr: The expression or column for which you want to calculate the sum.
+                    in this case we are using it to sum up the integer values (0s and 1s) of outlier indicator columns to get the total count of outliers per row.
+                """
+                # Create expression to count outliers
+                outlier_count_expr = sum(F.col(col).cast("int") for col in outlier_columns)
+            
+                # Add outlier count column
+                df_with_count = df_with_outliers.withColumn("outlier_count", outlier_count_expr)
+
+                # Filter rows with fewer outliers than threshold
+                cleaned_df = df_with_count.filter(F.col("outlier_count") < min_outliers)
+
+                # Remove temporary columns
+                cleaned_df = cleaned_df.drop("outlier_count")
+                for col in outlier_columns:
+                    cleaned_df = cleaned_df.drop(col)
+
+                rows_removed = initial_rows - cleaned_df.count()
+                removal_percentage = (rows_removed / initial_rows * 100) if initial_rows > 0 else 0
+
+                logger.info(f"Removed {rows_removed} rows with {min_outliers}+ outliers ({removal_percentage:.2f}%)")
+                logger.info(f"Remaining rows: {cleaned_df.count()} ({(cleaned_df.count()/initial_rows*100):.2f}%)")
+            
+            if self.method =='cap':
+                bounds = self.strategy.get_outlier_bounds(df, selected_columns)
+                cleaned_df = df
+
+                for col in selected_columns:
+                    lower_bound, upper_bound = bounds[col]
+                    """
+                        when: - is a function in PySpark's functions module that allows you to create conditional 
+                                    expressions similar to SQL's CASE WHEN statements. It is used to evaluate 
+                                    conditions and return different values based on those conditions.
+                        when(condition, value)
+                        Parameters:
+                            - condition: The condition to evaluate (a Column expression).
+                            - value: The value to return if the condition is true.
+                        otherwise(value)
+                            - value: The value to return if none of the when conditions are true.
+                    """
+                    cleaned_df = cleaned_df.withColumn(
+                        col,
+                        F.when(F.col(col) < lower_bound, lower_bound)
+                        .when(F.col(col) > upper_bound, upper_bound)
+                        .otherwise(F.col(col))
+                        )
+                    logger.info(f"Capped outliers at IQR bounds for {len(selected_columns)} columns")
+                else:
+                    raise ValueError(f"Unknown outlier handling method: {method}")
+                
+            ProjectLogger.log_success_header(logger, "OUTLIER HANDLING COMPLETED")
+            return cleaned_df
+
+        except Exception as e:
+            logger.error(f"Unexpected error: {str(e)}")
+            raise
