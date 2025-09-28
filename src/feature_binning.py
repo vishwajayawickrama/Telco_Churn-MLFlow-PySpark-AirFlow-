@@ -162,3 +162,105 @@ class CustomBinningStrategy(FeatureBinningStrategy):
             ProjectLogger.log_error_header(logger, "UNEXPECTED ERROR IN FEATURE BINNING")
             logger.error(f"Unexpected error: {str(e)}")
             raise
+
+class BucketizerBinningStrategy(FeatureBinningStrategy):
+    """Binning strategy using PySpark's Bucketizer."""
+
+    def __init__(self, splits: List[float], labels: Optional[List[str]] = None, 
+                 handle_invalid: str = "keep", spark: Optional[SparkSession] = None):
+        """
+        Initialize Bucketizer binning strategy.
+        
+        Args:
+            splits: List of split points for binning (must be monotonically increasing)
+            labels: Optional list of bin labels (length should be len(splits) - 1)
+            handle_invalid: How to handle values outside splits ("keep", "skip", "error")
+            spark: Optional SparkSession
+        """
+        super().__init__(spark)
+        self.splits = splits
+        self.labels = labels
+        self.handle_invalid = handle_invalid
+        logger.info(f"BucketizerBinningStrategy initialized with {len(splits)-1} bins")
+
+    def bin_feature(self, df: DataFrame, column: str) -> DataFrame:
+        """
+        Apply Bucketizer binning to a feature column.
+        
+        Args:
+            df: PySpark DataFrame
+            column: Column name to bin
+            
+        Returns:
+            DataFrame with binned feature
+        """
+
+        ProjectLogger.log_step_header(logger, "STEP", f"APPLYING BUCKETIZER BINNING TO COLUMN: {column}")
+
+        try:
+            # Create output column name
+            bin_column = f"{column}Bins"
+            temp_bin_column = f"{column}_bin_index"
+
+            """
+                Bucketizer: Bucketizer is a feature transformer in PySpark that is used to bin 
+                            continuous features into discrete bins. It maps a column of continuous 
+                            features to a column of feature buckets, where each bucket represents a 
+                            range of values.
+                Bucketizer(splits, inputCol=None, outputCol=None, handleInvalid='error')
+                Parameters:
+                    splits: list - A list of split points for binning (must be monotonically increasing 
+                    inputCol: str - Name of the input column to be binned
+                    outputCol: str - Name of the output column to store binned values
+                    handleInvalid: str - How to handle values outside splits ("keep", "skip", "error")
+                Returns:
+                    Bucketizer - An instance of the Bucketizer transformer
+            """
+
+            # Create and apply Bucketizer
+            bucketizer = Bucketizer(
+                splits=self.splits,
+                inputCol=column,
+                outputCol=temp_bin_column,
+                handleInvalid=self.handle_invalid
+            )
+
+            df_binned = bucketizer.transform(df)
+
+            # If labels are provided, map indices to labels
+            if self.labels:
+                # Create mapping expression
+                label_expr = F.when(F.col(temp_bin_column) == 0, self.labels[0])
+                for i in range(1, len(self.labels)):
+                    label_expr = label_expr.when(F.col(temp_bin_column) == i, self.labels[i])
+                label_expr = label_expr.otherwise("Unknown")
+            
+                df_binned = df_binned.withColumn(bin_column, label_expr)
+                df_binned = df_binned.drop(temp_bin_column)
+            else:
+                # Use numeric bin indices
+                df_binned = df_binned.withColumnRenamed(temp_bin_column, bin_column)
+            
+            # Log binning results
+            bin_dist = df_binned.groupBy(bin_column).count().orderBy(F.desc('count')).collect()
+            total_count = df_binned.count()
+        
+            logger.info(f"\nBinning Results:")
+            for row in bin_dist:
+                bin_value = row[bin_column]
+                count = row['count']
+                percentage = (count / total_count * 100)
+                logger.info(f"Bin {bin_value}: {count} ({percentage:.2f}%)")
+        
+            # Drop original column if requested
+            df_binned = df_binned.drop(column)
+
+            ProjectLogger.log_success_header(logger, "BUCKETIZER BINNING COMPLETED")
+
+            return df_binned
+            
+        except Exception as e:
+            ProjectLogger.log_error_header(logger, "UNEXPECTED ERROR IN FEATURE BINNING")
+            logger.error(f"Unexpected error: {str(e)}")
+            raise
+    
