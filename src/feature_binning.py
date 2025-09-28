@@ -1,14 +1,15 @@
 import os
 import sys
-import pandas as pd
 from abc import ABC, abstractmethod
+from typing import Dict, List, Optional, Union
 from typing import Dict, List, Union, Tuple
-
-# Add utils to path for logger import
+from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql import functions as F
+from pyspark.ml.feature import Bucketizer
+from spark_session import get_or_create_spark_session
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
 from logger import get_logger, ProjectLogger, log_exceptions
 
-# Initialize logger
 logger = get_logger(__name__)
 
 
@@ -16,18 +17,21 @@ class FeatureBinningStrategy(ABC):
     """
     Abstract base class for feature binning strategies.
     """
+    def __init__(self, spark: Optional[SparkSession] = None):
+        """Initialize with SparkSession."""
+        self.spark = spark or get_or_create_spark_session()
 
     @abstractmethod
-    def bin_feature(self, df: pd.DataFrame, column: str) -> pd.DataFrame:
+    def bin_feature(self, df: DataFrame, column: str) -> DataFrame:
         """
         Bin a feature in the DataFrame.
         
         Args:
-            df (pd.DataFrame): Input DataFrame
+            df (DataFrame): Input DataFrame
             column (str): Column to bin
             
         Returns:
-            pd.DataFrame: DataFrame with binned feature
+            DataFrame: DataFrame with binned feature
         """
         pass
 
@@ -36,140 +40,123 @@ class CustomBinningStrategy(FeatureBinningStrategy):
     """
     Custom feature binning strategy using user-defined bin definitions.
     """
-    
-    def __init__(self, bin_definitions: Dict[str, List[Union[int, float]]]):
+
+    def __init__(self, bin_definitions: Dict[str, List[float]], spark: Optional[SparkSession] = None):
         """
         Initialize custom binning strategy.
         
         Args:
-            bin_definitions (Dict): Dictionary defining bins with format:
-                {
-                    'bin_label': [min_value, max_value],  # Range bin
-                    'bin_label': [min_value],             # Open-ended bin (value >= min_value)
-                }
+            bin_definitions: Dictionary mapping bin names to [min, max] ranges
+            spark: Optional SparkSession
         """
+        super().__init__(spark)
         self.bin_definitions = bin_definitions
         
         ProjectLogger.log_section_header(logger, "INITIALIZING CUSTOM BINNING STRATEGY")
-        logger.info(f"Number of bin definitions: {len(self.bin_definitions)}")
+        logger.info(f"CustomBinningStrategy initialized with bins: {list(bin_definitions.keys())}")
         
-        for bin_label, bin_range in self.bin_definitions.items():
-            if len(bin_range) == 2:
-                logger.info(f"  - {bin_label}: [{bin_range[0]}, {bin_range[1]}]")
-            elif len(bin_range) == 1:
-                logger.info(f"  - {bin_label}: >= {bin_range[0]}")
-            else:
-                logger.warning(f"  - {bin_label}: Invalid range definition {bin_range}")
 
     @log_exceptions(logger)
-    def bin_feature(self, df: pd.DataFrame, column: str) -> pd.DataFrame:
+    def bin_feature(self, df: DataFrame, column: str) -> DataFrame:
         """
         Apply custom binning to a feature.
         
         Args:
-            df (pd.DataFrame): Input DataFrame
+            df (DataFrame): Input DataFrame
             column (str): Column to bin
             
         Returns:
-            pd.DataFrame: DataFrame with binned feature
-            
-        Raises:
-            ValueError: If DataFrame is empty or column doesn't exist
-            KeyError: If column is not found in DataFrame
-            Exception: For any unexpected errors
+            DataFrame: DataFrame with binned feature
         """
         ProjectLogger.log_step_header(logger, "STEP", f"APPLYING CUSTOM BINNING TO COLUMN: {column}")
         
         try:
-            # Validate input
-            if df.empty:
-                raise ValueError("Input DataFrame is empty")
-            
-            if column not in df.columns:
-                raise KeyError(f"Column '{column}' not found in DataFrame")
-            
-            # Check if column is numeric
-            if not pd.api.types.is_numeric_dtype(df[column]):
-                logger.warning(f"Column '{column}' is not numeric, proceeding with binning anyway")
-            
-            logger.info(f"Original column shape: {df[column].shape}")
-            logger.info(f"Original column type: {df[column].dtype}")
-            logger.info(f"Value range: [{df[column].min():.2f}, {df[column].max():.2f}]")
-            
-            # Create copy to avoid modifying original
-            df_result = df.copy()
-            
-            # Create binned column name
-            binned_column = f'{column}Bins'
-            
-            # Apply binning function
-            def assign_bin(value):
-                """
-                Assign a bin label to a value based on bin definitions.
-                
-                Args:
-                    value: The value to bin
-                    
+            """
+                select: select is used to select specific columns from a DataFrame. It can also be used 
+                        to perform operations on columns, such as renaming or applying functions.
+                select()
+                Parameters:
+                    *cols: str or Column - Column names (as strings) or Column expressions to select
                 Returns:
-                    str: Bin label
-                """
-                # Handle missing values
-                if pd.isna(value):
-                    return "Missing"
+                    DataFrame - A new DataFrame with the selected columns
+            """
+            # Get column statistics
+            stats = df.select(
+                                F.count(F.col(column)).alias('count'),
+                                F.countDistinct(F.col(column)).alias('unique'),
+                                F.min(F.col(column)).alias('min'),
+                                F.max(F.col(column)).alias('max')
+                            ).collect()[0]
+            
+            logger.info(f"  Unique values: {stats['unique']}, Range: [{stats['min']:.2f}, {stats['max']:.2f}]")
+            
+            # Create binning expression
+            bin_column = f"{column}Bins"
+            
+            
                 
-                # Check each bin definition
-                for bin_label, bin_range in self.bin_definitions.items():
-                    if len(bin_range) == 2:
-                        # Range bin: [min, max]
-                        if bin_range[0] <= value <= bin_range[1]:
-                            return bin_label
-                    elif len(bin_range) == 1:
-                        # Open-ended bin: >= min
-                        if value >= bin_range[0]:
-                            return bin_label
-                
-                # If no bin matches, return Invalid
-                return "Invalid"
+            # Check each bin definition
+            for bin_label, bin_range in self.bin_definitions.items():
+                if len(bin_range) == 2:
+                    # Range bin: [min, max]
+                    case_expr = case_expr.when(
+                        (F.col(column) >= bin_range[0]) & (F.col(column) <= bin_range[1]),
+                        bin_label
+                    )
+                elif len(bin_range) == 1:
+                    # Open-ended bin: >= min
+                    case_expr = case_expr.when(
+                        (F.col(column) >= bin_range[0]),
+                        bin_label
+                    )
             
             # Apply binning
-            logger.info("Applying binning transformation...")
-            df_result[binned_column] = df_result[column].apply(assign_bin)
-            
+            case_expr = case_expr.otherwise("Invalid")
+            df_binned = df.withColumn(bin_column, case_expr)
+
+            """
+                collect: collect is used to retrieve all the rows of a DataFrame as a list of Row objects. 
+                         It is an action operation that triggers the execution of the DataFrame transformations.
+                collect()
+                Parameters: None
+                Returns:
+                    list - A list of Row objects representing the DataFrame rows    
+            """
+
+            """
+                groupBy: groupBy is used to group the rows of a DataFrame based on one or more columns. 
+                         It is often used in conjunction with aggregation functions to perform calculations on grouped data.
+                groupBy(*cols)
+                Parameters:
+                    *cols: str or Column - Column names (as strings) or Column expressions to group by
+                Returns:
+                    GroupedData - An object that can be used to perform aggregations on the grouped data
+            """
+
             # Log binning results
-            bin_counts = df_result[binned_column].value_counts()
-            logger.info(f"Binning results for '{binned_column}':")
-            for bin_label, count in bin_counts.items():
-                percentage = (count / len(df_result)) * 100
-                logger.info(f"  - {bin_label}: {count} records ({percentage:.2f}%)")
-            
-            # Check for invalid bins
-            invalid_count = (df_result[binned_column] == "Invalid").sum()
+            bin_counts = df_binned.groupBy(bin_column).count().orderBy(F.desc('count')).collect()
+
+            logger.info(f"\nBinning Results:")
+            total_count = df_binned.count()
+            for row in bin_counts:
+                bin_name = row[bin_column]
+                count = row['count']
+                percentage = (count / total_count * 100)
+                logger.info(f"  ✓ {bin_name}: {count} ({percentage:.2f}%)")
+        
+            # Check for invalid values
+            invalid_count = df_binned.filter(F.col(bin_column) == "Invalid").count()
             if invalid_count > 0:
-                logger.warning(f"Found {invalid_count} values that didn't match any bin definition")
-                invalid_values = df_result[df_result[binned_column] == "Invalid"][column].unique()
-                logger.warning(f"Invalid values sample: {invalid_values[:10]}")  # Show first 10
+                logger.warning(f"  ⚠ Found {invalid_count} invalid values in column '{column}'")
+        
+             # Drop original column
+            df_binned = df_binned.drop(column)
             
-            # Remove original column
-            logger.info(f"Removing original column '{column}'")
-            del df_result[column]
-            
-            logger.info(f"Final DataFrame shape: {df_result.shape}")
-            logger.info(f"New binned column '{binned_column}' created successfully")
+            logger.info(f"✓ Original column '{column}' removed, replaced with '{bin_column}'")
             
             ProjectLogger.log_success_header(logger, "CUSTOM BINNING COMPLETED")
-            
-            return df_result
-            
-        except ValueError as e:
-            ProjectLogger.log_error_header(logger, "DATA VALIDATION ERROR")
-            logger.error(f"Data validation error: {str(e)}")
-            raise
-            
-        except KeyError as e:
-            ProjectLogger.log_error_header(logger, "COLUMN NOT FOUND ERROR")
-            logger.error(f"Column error: {str(e)}")
-            logger.error(f"Available columns: {list(df.columns)}")
-            raise
+
+            return df_binned
             
         except Exception as e:
             ProjectLogger.log_error_header(logger, "UNEXPECTED ERROR IN FEATURE BINNING")
