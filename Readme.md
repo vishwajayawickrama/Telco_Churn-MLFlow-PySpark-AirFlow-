@@ -114,7 +114,7 @@ print(f"Test samples: {len(data_result['X_test'])}")
 ### Model Training & Comparison
 
 ```python
-from pipelines.training_pipeline_pyspark import compare_models_pyspark
+from pipelines.training_pipeline import compare_models_pyspark
 
 # Compare multiple models
 comparison = compare_models_pyspark(
@@ -200,7 +200,7 @@ model:
 
 ```bash
 # Single machine with all cores
-python pipelines/training_pipeline_pyspark.py
+python pipelines/training_pipeline.py
 ```
 
 ### Standalone Cluster
@@ -294,15 +294,15 @@ python migration_demo.py
 
 ```python
 # Test data pipeline
-from pipelines.data_pipeline_pyspark import data_pipeline_pyspark
+from pipelines.data_pipeline import data_pipeline_pyspark
 result = data_pipeline_pyspark(force_rebuild=True)
 
 # Test model training
-from pipelines.training_pipeline_pyspark import training_pipeline_pyspark
+from pipelines.training_pipeline import training_pipeline_pyspark
 model = training_pipeline_pyspark(model_type='gbt')
 
 # Test inference
-from pipelines.streaming_inference_pipeline_pyspark import streaming_inference_pyspark
+from pipelines.streaming_inference_pipeline import streaming_inference_pyspark
 prediction = streaming_inference_pyspark(input_data=sample_customer)
 ```
 
@@ -361,9 +361,9 @@ Ensure all functions used in Spark transformations are serializable.
 │   ├── model_building.py         # PySpark ML models
 │   └── ...
 ├── pipelines/                    # Pipeline implementations
-│   ├── data_pipeline_pyspark.py  # PySpark data pipeline
-│   ├── training_pipeline_pyspark.py # PySpark training
-│   └── streaming_inference_pipeline_pyspark.py # Real-time inference
+│   ├── data_pipeline.py  # PySpark data pipeline
+│   ├── training_pipeline.py # PySpark training
+│   └── streaming_inference_pipeline.py # Real-time inference
 ├── utils/                        # Utilities
 │   ├── spark_utils.py           # Spark session management
 │   ├── mlflow_utils.py          # MLflow PySpark support

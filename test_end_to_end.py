@@ -73,7 +73,7 @@ def test_complete_pyspark_pipeline():
         ProjectLogger.log_step_header(logger, "TEST", "2: PYSPARK DATA PIPELINE")
         
         try:
-            from data_pipeline_pyspark import data_pipeline_pyspark
+            from pipelines.data_pipeline import data_pipeline_pyspark
             
             # Test data pipeline
             logger.info("Running PySpark data pipeline...")
@@ -122,7 +122,7 @@ def test_complete_pyspark_pipeline():
         ProjectLogger.log_step_header(logger, "TEST", "3: PYSPARK MODEL TRAINING")
         
         try:
-            from training_pipeline_pyspark import training_pipeline_pyspark
+            from pipelines.training_pipeline import training_pipeline_pyspark
             
             # Test single model training
             logger.info("Training PySpark GBT model...")
@@ -174,7 +174,7 @@ def test_complete_pyspark_pipeline():
         ProjectLogger.log_step_header(logger, "TEST", "4: PYSPARK MODEL COMPARISON")
         
         try:
-            from training_pipeline_pyspark import compare_models_pyspark
+            from pipelines.training_pipeline import compare_models_pyspark
             
             # Test model comparison with subset of models for speed
             logger.info("Comparing PySpark models...")
@@ -228,7 +228,7 @@ def test_complete_pyspark_pipeline():
         ProjectLogger.log_step_header(logger, "TEST", "5: PYSPARK STREAMING INFERENCE")
         
         try:
-            from streaming_inference_pipeline_pyspark import streaming_inference_pyspark
+            from pipelines.streaming_inference_pipeline import streaming_inference_pyspark
             
             # Test streaming inference setup (without actual model since it may not exist)
             logger.info("Testing PySpark streaming inference setup...")

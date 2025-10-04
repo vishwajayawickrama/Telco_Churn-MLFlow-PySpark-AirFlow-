@@ -73,7 +73,7 @@ class TestPySparkMigration(unittest.TestCase):
         logger.info("Testing PySpark data pipeline")
         
         try:
-            from data_pipeline_pyspark import data_pipeline_pyspark
+            from pipelines.data_pipeline import data_pipeline_pyspark
             
             # Run PySpark data pipeline
             result = data_pipeline_pyspark(
@@ -106,7 +106,7 @@ class TestPySparkMigration(unittest.TestCase):
         logger.info("Testing PySpark training pipeline")
         
         try:
-            from training_pipeline_pyspark import training_pipeline_pyspark
+            from pipelines.training_pipeline import training_pipeline_pyspark
             
             # Run PySpark training pipeline
             result = training_pipeline_pyspark(
@@ -153,7 +153,7 @@ class TestPySparkMigration(unittest.TestCase):
         logger.info("Testing PySpark streaming inference")
         
         try:
-            from streaming_inference_pipeline_pyspark import streaming_inference_pyspark
+            from pipelines.streaming_inference_pipeline import streaming_inference_pyspark
             
             # Sample customer data
             sample_customer = {
