@@ -22,9 +22,11 @@ import logging
 from typing import Dict, Any, List
 
 # Add project paths
-sys.path.append('/opt/airflow/dags/pipelines')
-sys.path.append('/opt/airflow/dags/src')
-sys.path.append('/opt/airflow/dags/utils')
+import os
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.join(project_root, 'pipelines'))
+sys.path.append(os.path.join(project_root, 'src'))
+sys.path.append(os.path.join(project_root, 'utils'))
 
 from airflow_utils import AirflowMLPipelineUtils, get_default_config
 
@@ -452,7 +454,7 @@ def update_production_config(**context):
         
         # Save production configuration
         import json
-        config_path = f"/opt/airflow/artifacts/config/production_model_config_{context['ds']}.json"
+        config_path = os.path.join(project_root, 'artifacts', 'config', f'production_model_config_{context["ds"]}.json')
         os.makedirs(os.path.dirname(config_path), exist_ok=True)
         
         with open(config_path, 'w') as f:

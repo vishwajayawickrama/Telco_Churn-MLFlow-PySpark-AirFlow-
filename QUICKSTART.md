@@ -4,6 +4,7 @@
 
 ```bash
 # Start the complete ML pipeline
+make setup-local-airflow
 make start-pipeline
 ```
 
@@ -11,17 +12,16 @@ make start-pipeline
 
 | Service | URL | Credentials |
 |---------|-----|-------------|
-| Airflow Webserver | http://localhost:8080 | admin/admin |
+| Airflow Webserver | http://localhost:8080 | admin/[your_password] |
 | MLflow UI | http://localhost:5000 | - |
-| Spark Master | http://localhost:8081 | - |
 
 ## 🔄 Available Commands
 
 ```bash
 # Setup and Installation
 make install              # Install all dependencies
-make setup-airflow        # Initialize Airflow
-make start-services       # Start Docker services
+make setup-local-airflow  # Initialize local Airflow
+make start-mlflow         # Start MLflow server
 
 # Pipeline Execution
 make run-preprocessing    # Run data preprocessing
@@ -30,7 +30,7 @@ make run-inference        # Run batch inference
 make run-full-pipeline    # Execute complete pipeline
 
 # Airflow Operations
-make airflow-start        # Start Airflow services
+make airflow-start        # Start Airflow webserver and scheduler
 make airflow-stop         # Stop Airflow services
 make airflow-restart      # Restart Airflow
 make airflow-logs         # View Airflow logs
@@ -66,10 +66,11 @@ make monitor-models       # Model performance monitoring
 ```bash
 # 1. Setup environment
 make install
-make setup-airflow
+make setup-local-airflow
 
 # 2. Start services
-make start-services
+make start-mlflow
+make airflow-start
 
 # 3. Run pipeline
 make run-full-pipeline
@@ -84,8 +85,9 @@ make run-full-pipeline
 ```bash
 # Reset everything
 make clean-all
-make setup-airflow
-make start-services
+make setup-local-airflow
+make start-mlflow
+make airflow-start
 
 # Check service status
 make check-status

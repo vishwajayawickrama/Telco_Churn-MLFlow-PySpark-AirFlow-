@@ -15,7 +15,8 @@ This project implements a comprehensive machine learning pipeline for telecommun
 
 ### System Requirements
 - Python 3.8+
-- Docker & Docker Compose
+- Apache Airflow 2.7.0+
+- Java 8+ (for PySpark)
 - At least 8GB RAM
 - 20GB free disk space
 
@@ -28,10 +29,8 @@ scikit-learn==1.3.0
 pandas==2.0.3
 numpy==1.24.3
 
-# Airflow
-apache-airflow==2.7.0
-apache-airflow[postgres]==2.7.0
-apache-airflow[redis]==2.7.0
+# Airflow (install separately)
+# apache-airflow==2.7.0
 
 # Additional Libraries
 scipy==1.11.0
@@ -69,25 +68,38 @@ pip install -r requirements.txt
 pip install -r requirements.airflow.txt
 ```
 
-### 2. Airflow Setup with Docker
+### 2. Local Airflow Setup
 
 ```bash
+# Install Airflow
+pip install apache-airflow==2.7.0
+
 # Initialize Airflow database
-docker-compose -f docker-compose.airflow.yml up airflow-init
+export AIRFLOW_HOME=~/airflow
+airflow db init
 
-# Start all services
-docker-compose -f docker-compose.airflow.yml up -d
+# Create admin user
+airflow users create \
+    --username admin \
+    --firstname Admin \
+    --lastname User \
+    --role Admin \
+    --email admin@example.com
 
-# Verify services are running
-docker-compose -f docker-compose.airflow.yml ps
+# Copy DAGs to Airflow directory
+cp -r dags/ ~/airflow/dags/
+
+# Start Airflow webserver and scheduler
+airflow webserver --port 8080 &
+airflow scheduler &
 ```
 
 ### 3. Access Points
 
 After successful setup:
-- **Airflow Webserver**: http://localhost:8080 (admin/admin)
-- **MLflow UI**: http://localhost:5000
-- **Spark Master UI**: http://localhost:8081
+- **Airflow Webserver**: http://localhost:8080 (admin/[your_password])
+- **MLflow UI**: Start with `mlflow ui` and access at http://localhost:5000
+- **Spark Master UI**: Available when running PySpark applications
 
 ## 📊 Data Pipeline Workflow
 
@@ -217,14 +229,18 @@ mlflow:
 ```
 
 ### Airflow Configuration
-```yaml
-# Core settings
-AIRFLOW__CORE__EXECUTOR: LocalExecutor
-AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+```bash
+# Core settings (in ~/airflow/airflow.cfg)
+executor = LocalExecutor
+sql_alchemy_conn = sqlite:////Users/[username]/airflow/airflow.db
 
 # Web server
-AIRFLOW__WEBSERVER__EXPOSE_CONFIG: true
-AIRFLOW__WEBSERVER__RBAC: false
+expose_config = True
+rbac = False
+
+# Set environment variables
+export AIRFLOW_HOME=~/airflow
+export PYTHONPATH=$PYTHONPATH:/path/to/your/project
 ```
 
 ## 📊 Monitoring and Alerts
@@ -287,9 +303,7 @@ python pipelines/training_pipeline.py
 Telco_Customer_Churn(MLFlow, PySpark, Airflow integrated)/
 ├── config.yaml                           # Main configuration
 ├── requirements.txt                       # Python dependencies
-├── requirements.airflow.txt              # Airflow dependencies
-├── docker-compose.airflow.yml            # Docker services
-├── Dockerfile.airflow                    # Airflow container
+├── requirements.txt                      # Python dependencies
 ├── 
 ├── data/
 │   ├── raw/                              # Original datasets
@@ -329,8 +343,8 @@ Telco_Customer_Churn(MLFlow, PySpark, Airflow integrated)/
 1. **Airflow Connection Issues**
    ```bash
    # Reset Airflow database
-   docker-compose -f docker-compose.airflow.yml down -v
-   docker-compose -f docker-compose.airflow.yml up airflow-init
+   airflow db reset
+   airflow db init
    ```
 
 2. **PySpark Memory Issues**
@@ -342,15 +356,15 @@ Telco_Customer_Churn(MLFlow, PySpark, Airflow integrated)/
 
 3. **MLflow Connection Issues**
    ```bash
-   # Restart MLflow service
-   docker-compose -f docker-compose.airflow.yml restart mlflow
+   # Start MLflow tracking server
+   mlflow server --host 127.0.0.1 --port 5000
    ```
 
 ### Logs and Debugging
-- **Airflow Logs**: Available in Web UI task instances
+- **Airflow Logs**: Available in Web UI task instances and `~/airflow/logs/`
 - **Application Logs**: `logs/` directory
-- **MLflow Logs**: Docker container logs
-- **Spark Logs**: Spark Master UI
+- **MLflow Logs**: Console output when running `mlflow ui`
+- **Spark Logs**: Available in Spark application UI and local logs
 
 ## 📝 Best Practices
 
