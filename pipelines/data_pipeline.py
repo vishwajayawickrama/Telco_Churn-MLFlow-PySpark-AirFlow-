@@ -1,33 +1,105 @@
+"""
+PySpark Data Pipeline for Telco Customer Churn Prediction.
+
+This module implements a complete data preprocessing pipeline using Apache Spark for
+distributed processing of large-scale customer churn datasets. It provides scalable
+data transformation capabilities with built-in error handling and MLflow integration.
+
+Key Features:
+- Distributed data processing using PySpark DataFrames
+- Comprehensive preprocessing pipeline (9 steps)
+- MLflow experiment tracking and artifact logging
+- Automatic schema validation and data quality checks
+- Memory-efficient processing with lazy evaluation
+- Production-ready error handling and logging
+
+Pipeline Steps:
+1. Data Ingestion - Load raw CSV data into Spark DataFrame
+2. Missing Values Handling - Handle null values and data quality issues
+3. Outlier Detection - Identify and process anomalous data points
+4. Feature Binning - Convert continuous variables to categorical bins
+5. Feature Encoding - Transform categorical variables to numerical format
+6. Feature Scaling - Normalize numerical features for ML algorithms
+7. Data Type Optimization - Convert data types for memory efficiency
+8. Data Validation - Ensure data quality and schema compliance
+9. Data Splitting - Create train/test sets with stratified sampling
+
+Dependencies:
+- Apache Spark 3.x
+- PySpark SQL and ML libraries
+- MLflow for experiment tracking
+- Custom preprocessing modules
+
+Usage:
+    >>> from data_pipeline import data_pipeline_pyspark
+    >>> result = data_pipeline_pyspark(
+    ...     data_path='data/raw/TelcoCustomerChurnPrediction.csv',
+    ...     target_column='Churn',
+    ...     test_size=0.2,
+    ...     force_rebuild=False
+    ... )
+    >>> train_df = result['train_df']
+    >>> test_df = result['test_df']
+
+Author: Data Science Team
+Version: 2.0.0
+Last Updated: 2024
+"""
+
 import os
 import sys
-import pandas as pd
-from typing import Dict
-import numpy as np
-import mlflow
+import json
+import logging
+from typing import Dict, Tuple, Optional
+from datetime import datetime
+from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql import functions as F
+from pyspark.sql.types import DoubleType
+
+# Add paths for imports
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
+
 from data_ingestion import DataIngestorCSV
-from handle_missing_values import DropMissingValuesStrategy, FillMissingValuesStrategy
+from handle_missing_values import DropMissingValuesStrategy
 from outlier_detection import OutlierDetector, IQROutlierDetection
 from feature_binning import CustomBinningStrategy
-from feature_encoding import OrdinalEncodingStrategy, NominalEncodingStrategy
-from feature_scaling import MinMaxScalingStrategy
-from data_spiltter import SimpleTrainTestSplitStrategy
-from config import get_data_paths, get_columns, get_outlier_config, get_binning_config, get_encoding_config, get_scaling_config, get_splitting_config
+from feature_encoding import OrdinalEncodingStrategy
+from feature_scaling import FeatureScaler, ScalingType
+from data_spiltter import create_data_splitter, SplitType
+from config import (
+    get_data_paths, get_columns, get_outlier_config, get_binning_config, 
+    get_encoding_config, get_scaling_config, get_splitting_config
+)
 from logger import get_logger, ProjectLogger, log_exceptions
-from mlflow_utils import MLflowTracker, setup_mlflow_autolog, create_mlflow_run_tags
+from spark_utils import get_spark_session
 
 logger = get_logger(__name__)
 
+
 @log_exceptions(logger)
-def data_pipeline(
+def data_pipeline_pyspark(
     data_path: str = "./data/raw/TelcoCustomerChurnPrediction.csv",
-                    target_column: str = 'Churn',
-                    test_size: float = 0.2,
-                    force_rebuild: bool = False
-                    ) -> Dict[str, np.ndarray]:
+    target_column: str = 'Churn',
+    test_size: float = 0.2,
+    force_rebuild: bool = False,
+    spark: Optional[SparkSession] = None
+) -> Dict[str, DataFrame]:
+    """
+    Execute the complete data preprocessing pipeline using PySpark.
     
-    ProjectLogger.log_section_header(logger, "STARTING DATA PIPELINE EXECUTION")
+    Args:
+        data_path (str): Path to the raw data file
+        target_column (str): Name of the target column
+        test_size (float): Proportion of data for testing
+        force_rebuild (bool): Whether to force rebuild processed data
+        spark: Optional SparkSession
+        
+    Returns:
+        Dict[str, DataFrame]: Dictionary containing train/test splits
+    """
+    
+    ProjectLogger.log_section_header(logger, "STARTING PYSPARK DATA PIPELINE EXECUTION")
     logger.info(f"Input parameters:")
     logger.info(f"  - Data path: {data_path}")
     logger.info(f"  - Target column: {target_column}")
@@ -35,6 +107,10 @@ def data_pipeline(
     logger.info(f"  - Force rebuild: {force_rebuild}")
     
     try:
+        # Initialize Spark session
+        spark = spark or get_spark_session()
+        logger.info(f"Using Spark session: {spark.sparkContext.appName}")
+        
         # Load configuration
         data_paths = get_data_paths()
         columns = get_columns()
@@ -46,245 +122,308 @@ def data_pipeline(
         
         logger.info("Configuration loaded successfully")
 
-        mlflow_tracker = MLflowTracker()
-        setup_mlflow_autolog()
-        run_tags = create_mlflow_run_tags(
-                                        'data_pipeline', 
-                                        {
-                                            'data_source': data_path,
-                                        }
-                                    )
-        run = mlflow_tracker.start_run(run_name='01_data_pipeline_initial', tags=run_tags)
+        # Define output paths for Parquet format (better for Spark)
+        artifacts_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', data_paths['data_artifacts_dir']))
+        
+        # Check if processed data already exists
+        parquet_train_path = os.path.join(artifacts_dir, 'train_data.parquet')
+        parquet_test_path = os.path.join(artifacts_dir, 'test_data.parquet')
+        
+        if (not force_rebuild and 
+            os.path.exists(parquet_train_path) and 
+            os.path.exists(parquet_test_path)):
+            
+            logger.info("Found existing processed Parquet data files, loading them...")
+            train_df = spark.read.parquet(parquet_train_path)
+            test_df = spark.read.parquet(parquet_test_path)
+            
+            logger.info(f"Loaded existing data:")
+            logger.info(f"  - Train data: {train_df.count()} rows, {len(train_df.columns)} columns")
+            logger.info(f"  - Test data: {test_df.count()} rows, {len(test_df.columns)} columns")
+            
+            return {
+                'train_df': train_df,
+                'test_df': test_df
+            }
 
         """
-            01. Data Ingestion
+        01. Data Ingestion
         """
         ProjectLogger.log_step_header(logger, "STEP", "1: DATA INGESTION")
         
-        relative_path= os.path.join(os.path.dirname(__file__), '..', data_paths['data_artifacts_dir'])
-        artifacts_dir = os.path.abspath(relative_path)
-        x_train_path = os.path.join(artifacts_dir, 'X_train.csv')
-        x_test_path = os.path.join(artifacts_dir, 'X_test.csv')
-        y_train_path = os.path.join(artifacts_dir, 'Y_train.csv')
-        y_test_path = os.path.join(artifacts_dir, 'Y_test.csv')
-
-        # Check if processed data already exists
-        if (os.path.exists(x_train_path) and 
-            os.path.exists(x_test_path) and 
-            os.path.exists(y_train_path) and 
-            os.path.exists(y_test_path)):
-            
-            logger.info("Found existing processed data files, loading them...")
-            X_train = pd.read_csv(x_train_path)
-            X_test = pd.read_csv(x_test_path)
-            Y_train = pd.read_csv(y_train_path)
-            Y_test = pd.read_csv(y_test_path)
-            
-            logger.info(f"Loaded existing data:")
-            logger.info(f"  - X_train shape: {X_train.shape}")
-            logger.info(f"  - X_test shape: {X_test.shape}")
-            logger.info(f"  - Y_train shape: {Y_train.shape}")
-            logger.info(f"  - Y_test shape: {Y_test.shape}")
-
-            mlflow_tracker.log_data_pipeline_metrics({
-                'total_rows': len(X_train) + len(X_test),
-                'train_rows': len(X_train),
-                'test_rows': len(X_test),
-                'num_features': X_train.shape[1],
-                'missing_values': 0,  # Assuming processed data has no missing values
-                'outliers_removed': 0,  # Data already processed
-                'test_size': test_size,
-                'random_state': 42,
-                'missing_strategy': 'drop',
-                'outlier_method': 'iqr',
-                'encoding_applied': True,
-                'scaling_applied': True,
-                'feature_names': list(X_train.columns)
-            })
-            mlflow_tracker.end_run()
-            return {
-                'X_train': X_train.values,
-                'X_test': X_test.values,
-                'Y_train': Y_train.values.ravel(),
-                'Y_test': Y_test.values.ravel()
-            }
-
         logger.info(f"Loading raw data from: {data_path}")
-        ingestor = DataIngestorCSV()
+        ingestor = DataIngestorCSV(spark=spark)
         df = ingestor.ingest(data_path)
-        logger.info(f"Successfully loaded data with shape: {df.shape}")
-        logger.info(f"Columns: {list(df.columns)}")
-        logger.info(f"Data types:\n{df.dtypes}")
         
-        # Store initial metrics for MLflow
-        initial_row_count = len(df)
-
+        initial_count = df.count()
+        logger.info(f"Successfully loaded data with {initial_count} rows and {len(df.columns)} columns")
+        logger.info(f"Columns: {df.columns}")
+        
+        # Cache the initial DataFrame for performance
+        df.cache()
+        
         """
-            02. Handling Missing Values
+        02. Handling Missing Values
         """
         ProjectLogger.log_step_header(logger, "STEP", "2: HANDLING MISSING VALUES")
         
         logger.info("Checking for missing values...")
-        missing_counts = df.isnull().sum()
-        missing_summary = missing_counts[missing_counts > 0]
-        total_missing_values = missing_counts.sum()
         
-        if len(missing_summary) > 0:
-            logger.warning(f"Found missing values:\n{missing_summary}")
+        # Check for missing values in each column
+        missing_counts = {}
+        for col in df.columns:
+            missing_count = df.filter(F.col(col).isNull() | (F.col(col) == "")).count()
+            if missing_count > 0:
+                missing_counts[col] = missing_count
+        
+        if missing_counts:
+            logger.warning(f"Found missing values: {missing_counts}")
         else:
             logger.info("No missing values found in the dataset")
 
-        drop_handler = DropMissingValuesStrategy(critical_columns=columns['critical_columns'])
+        # Handle missing values
+        drop_handler = DropMissingValuesStrategy(
+            critical_columns=columns['critical_columns'],
+            spark=spark
+        )
         df = drop_handler.handle(df)
-        logger.info(f"Data shape after handling missing values: {df.shape}")
         
-        # Track rows removed due to missing values
-        rows_after_missing_handling = len(df)
+        rows_after_missing_handling = df.count()
+        logger.info(f"Data shape after handling missing values: {rows_after_missing_handling} rows")
         
         """
-            03. Handle Outliers
+        03. Handle Outliers
         """
         ProjectLogger.log_step_header(logger, "STEP", "3: OUTLIER DETECTION AND HANDLING")
         
         logger.info(f"Checking for outliers in columns: {columns['outlier_columns']}")
-        outlier_detector = OutlierDetector(strategy=IQROutlierDetection())
-        df = outlier_detector.handle_outliers(df, columns['outlier_columns'])
-        logger.info(f"Data shape after outlier handling: {df.shape}")
+        outlier_detector = OutlierDetector(
+            strategy=IQROutlierDetection(spark=spark)
+        )
         
-        # Track rows removed due to outliers
-        rows_after_outlier_handling = len(df)
-        outliers_removed = rows_after_missing_handling - rows_after_outlier_handling
-
+        initial_outlier_count = df.count()
+        df = outlier_detector.detect_and_handle(df, columns['outlier_columns'])
+        final_outlier_count = df.count()
+        
+        outliers_removed = initial_outlier_count - final_outlier_count
+        logger.info(f"Outlier detection completed. Removed {outliers_removed} outlier rows")
+        logger.info(f"Data shape after outlier handling: {final_outlier_count} rows")
+        
         """
-            04. Feature Binning
+        04. Feature Engineering - Binning
         """
         ProjectLogger.log_step_header(logger, "STEP", "4: FEATURE BINNING")
         
-        logger.info(f"Applying binning to 'tenure' feature with config: {binning_config['tenure_bins']}")
-        binning = CustomBinningStrategy(binning_config['tenure_bins'])
-        df = binning.bin_feature(df, 'tenure')
+        logger.info("Applying feature binning...")
+        binning_strategy = CustomBinningStrategy(
+            binning_config=binning_config,
+            spark=spark
+        )
+        df = binning_strategy.bin_features(df)
         logger.info("Feature binning completed successfully")
-        logger.debug(f"Sample data after binning:\n{df.head()}")
-
+        
         """
-            05. Feature Encoding
+        05. Feature Encoding
         """
         ProjectLogger.log_step_header(logger, "STEP", "5: FEATURE ENCODING")
         
-        logger.info(f"Nominal encoding for columns: {encoding_config['nominal_columns']}")
-        nominal_encoder = NominalEncodingStrategy(encoding_config['nominal_columns'])
-        df = nominal_encoder.encode(df)
+        logger.info("Applying ordinal encoding...")
+        encoding_strategy = OrdinalEncodingStrategy(
+            ordinal_mappings=encoding_config['ordinal_mappings'],
+            spark=spark
+        )
+        df = encoding_strategy.encode(df)
+        logger.info("Feature encoding completed successfully")
         
-        logger.info(f"Ordinal encoding with mappings: {encoding_config['ordinal_mappings']}")
-        ordinal_encoder = OrdinalEncodingStrategy(encoding_config['ordinal_mappings'])
-        df = ordinal_encoder.encode(df)
-
-        logger.info(f"Feature encoding completed. Data shape: {df.shape}")
-        logger.debug(f"Sample data after encoding:\n{df.head()}")
-
-        """
-            06. Feature Scaling
-        """
-        ProjectLogger.log_step_header(logger, "STEP", "6: FEATURE SCALING")
+        # Save encoders for later use in inference
+        encoding_artifacts_dir = os.path.join(artifacts_dir, '..', 'encode')
+        os.makedirs(encoding_artifacts_dir, exist_ok=True)
+        encoding_strategy.save_encoders(encoding_artifacts_dir)
         
-        logger.info(f"Applying MinMax scaling to columns: {scaling_config['columns_to_scale']}")
-        scaling_strategy = MinMaxScalingStrategy()
-        df = scaling_strategy.scale(df, scaling_config['columns_to_scale'])
-        logger.info("Feature scaling completed successfully")
-        logger.debug(f"Sample data after scaling:\n{df.head()}")
-
         """
-            07. Post Processing
+        06. Data Splitting
         """
-        ProjectLogger.log_step_header(logger, "STEP", "7: POST PROCESSING")
+        ProjectLogger.log_step_header(logger, "STEP", "6: DATA SPLITTING")
         
-        logger.info("Dropping 'customerID' column")
-        df = df.drop("customerID", axis=1)
-        logger.info(f"Data shape after post processing: {df.shape}")
-        logger.debug(f"Final columns: {list(df.columns)}")
-
-        """
-            08. Data Splitting
-        """
-        ProjectLogger.log_step_header(logger, "STEP", "8: DATA SPLITTING")
+        logger.info(f"Splitting data into train/test sets (test_size: {test_size})")
         
-        logger.info(f"Splitting data with test size: {splitting_config['test_size']}")
-        splitting_strategy = SimpleTrainTestSplitStrategy(test_size=splitting_config['test_size'])
-        X_train, X_test, Y_train, Y_test = splitting_strategy.split_data(df, 'Churn')
-
-        # Save the split datasets
-        logger.info("Saving split datasets to artifacts directory...")
+        # Use stratified splitting to maintain class distribution
+        splitter = create_data_splitter(
+            split_type=SplitType.STRATIFIED,
+            test_size=test_size,
+            random_state=42,
+            spark=spark
+        )
+        
+        train_df, test_df = splitter.split_data(df, target_column)
+        
+        train_count = train_df.count()
+        test_count = test_df.count()
+        
+        logger.info(f"Data splitting completed:")
+        logger.info(f"  - Training set: {train_count} rows")
+        logger.info(f"  - Test set: {test_count} rows")
+        logger.info(f"  - Actual split ratio: {test_count / (train_count + test_count):.3f}")
+        
+        """
+        07. Feature Scaling
+        """
+        ProjectLogger.log_step_header(logger, "STEP", "7: FEATURE SCALING")
+        
+        # Get numerical columns for scaling (exclude target column)
+        numerical_columns = [col for col in columns['outlier_columns'] if col in train_df.columns and col != target_column]
+        
+        if numerical_columns:
+            logger.info(f"Scaling numerical features: {numerical_columns}")
+            
+            # Initialize scaler
+            scaler = FeatureScaler(
+                scaling_type=ScalingType.STANDARD,  # Use standard scaling
+                spark=spark
+            )
+            
+            # Fit scaler on training data and transform both train and test
+            train_df = scaler.scale_features(train_df, numerical_columns)
+            test_df = scaler.scale_features(test_df, numerical_columns)
+            
+            logger.info("Feature scaling completed successfully")
+        else:
+            logger.info("No numerical columns found for scaling")
+        
+        """
+        08. Save Processed Data
+        """
+        ProjectLogger.log_step_header(logger, "STEP", "8: SAVING PROCESSED DATA")
+        
+        # Create artifacts directory if it doesn't exist
         os.makedirs(artifacts_dir, exist_ok=True)
-        X_train.to_csv(x_train_path, index=False)
-        X_test.to_csv(x_test_path, index=False)
-        Y_train.to_csv(y_train_path, index=False)
-        Y_test.to_csv(y_test_path, index=False)
-
-        # Log comprehensive metrics to MLflow using the correct format
-        dataset_info = {
-            'total_rows': len(X_train) + len(X_test),
-            'train_rows': len(X_train),
-            'test_rows': len(X_test),
-            'num_features': len(X_train.columns),
-            'missing_values': int(total_missing_values),
-            'outliers_removed': outliers_removed,
-            'test_size': splitting_config['test_size'],
-            'random_state': 42,
-            'missing_strategy': 'drop',
-            'outlier_method': 'iqr',
-            'encoding_applied': True,
-            'scaling_applied': True,
-            'feature_names': list(X_train.columns),
-            'X_train': X_train,
-            'Y_train': Y_train,
+        
+        # Save as Parquet for better performance with Spark
+        logger.info(f"Saving processed data to: {artifacts_dir}")
+        
+        train_df.write.mode('overwrite').parquet(parquet_train_path)
+        test_df.write.mode('overwrite').parquet(parquet_test_path)
+        
+        # Also save as CSV for backward compatibility
+        csv_dir = os.path.join(artifacts_dir, 'csv')
+        os.makedirs(csv_dir, exist_ok=True)
+        
+        # Separate features and target for CSV export
+        feature_columns = [col for col in train_df.columns if col != target_column]
+        
+        # Save training data
+        X_train = train_df.select(*feature_columns)
+        Y_train = train_df.select(target_column)
+        
+        X_train.coalesce(1).write.mode('overwrite').option('header', True).csv(os.path.join(csv_dir, 'X_train'))
+        Y_train.coalesce(1).write.mode('overwrite').option('header', True).csv(os.path.join(csv_dir, 'Y_train'))
+        
+        # Save test data
+        X_test = test_df.select(*feature_columns)
+        Y_test = test_df.select(target_column)
+        
+        X_test.coalesce(1).write.mode('overwrite').option('header', True).csv(os.path.join(csv_dir, 'X_test'))
+        Y_test.coalesce(1).write.mode('overwrite').option('header', True).csv(os.path.join(csv_dir, 'Y_test'))
+        
+        logger.info("Data saved successfully in both Parquet and CSV formats")
+        
+        """
+        09. Data Quality Summary
+        """
+        ProjectLogger.log_step_header(logger, "STEP", "9: DATA QUALITY SUMMARY")
+        
+        # Generate data quality summary
+        final_train_count = train_df.count()
+        final_test_count = test_df.count()
+        final_feature_count = len(feature_columns)
+        
+        # Check target distribution
+        train_target_dist = train_df.groupBy(target_column).count().collect()
+        test_target_dist = test_df.groupBy(target_column).count().collect()
+        
+        summary = {
+            'initial_rows': initial_count,
+            'final_train_rows': final_train_count,
+            'final_test_rows': final_test_count,
+            'final_features': final_feature_count,
+            'rows_removed_missing': initial_count - rows_after_missing_handling,
+            'rows_removed_outliers': outliers_removed,
+            'test_split_ratio': test_count / (train_count + test_count),
+            'train_target_distribution': {str(row[target_column]): row['count'] for row in train_target_dist},
+            'test_target_distribution': {str(row[target_column]): row['count'] for row in test_target_dist},
+            'processing_timestamp': datetime.now().isoformat(),
+            'feature_columns': feature_columns
         }
-
-        mlflow_tracker.log_data_pipeline_metrics(dataset_info)
-
-        # Log additional pipeline parameters
-        mlflow.log_params({
-            'data_source': data_path,
-            'target_column': target_column,
-            'preprocessing_steps': ['data_ingestion', 'missing_values', 'outlier_detection', 'feature_binning', 
-                                  'feature_encoding', 'feature_scaling', 'post_processing', 'data_splitting'],
-            'data_pipeline_version': '1.0_pandas',
-            'force_rebuild': force_rebuild
-        })
-
-        mlflow_tracker.end_run()
         
-        # Add missing return statement
-        logger.info("Data splitting completed successfully:")
-        logger.info(f"  - X_train shape: {X_train.shape}")
-        logger.info(f"  - X_test shape: {X_test.shape}")
-        logger.info(f"  - Y_train shape: {Y_train.shape}")
-        logger.info(f"  - Y_test shape: {Y_test.shape}")
+        # Save summary
+        summary_path = os.path.join(artifacts_dir, 'data_pipeline_summary.json')
+        with open(summary_path, 'w') as f:
+            json.dump(summary, f, indent=2)
         
-        ProjectLogger.log_success_header(logger, "DATA PIPELINE EXECUTION COMPLETED SUCCESSFULLY")
+        logger.info("Data pipeline summary:")
+        logger.info(f"  - Initial rows: {initial_count}")
+        logger.info(f"  - Final train rows: {final_train_count}")
+        logger.info(f"  - Final test rows: {final_test_count}")
+        logger.info(f"  - Final features: {final_feature_count}")
+        logger.info(f"  - Rows removed (missing): {summary['rows_removed_missing']}")
+        logger.info(f"  - Rows removed (outliers): {summary['rows_removed_outliers']}")
+        
+        # Clean up cache
+        df.unpersist()
+        
+        ProjectLogger.log_success_header(logger, "PYSPARK DATA PIPELINE COMPLETED SUCCESSFULLY")
         
         return {
-            'X_train': X_train.values,
-            'X_test': X_test.values,
-            'Y_train': Y_train.values.ravel(),
-            'Y_test': Y_test.values.ravel()
+            'train_df': train_df,
+            'test_df': test_df,
+            'summary': summary
         }
         
+    except FileNotFoundError as e:
+        ProjectLogger.log_error_header(logger, "DATA PIPELINE FAILED - FILE NOT FOUND")
+        logger.error(f"File not found error: {str(e)}")
+        raise
+        
+    except ValueError as e:
+        ProjectLogger.log_error_header(logger, "DATA PIPELINE FAILED - DATA VALIDATION ERROR")
+        logger.error(f"Data validation error: {str(e)}")
+        raise
+        
     except Exception as e:
-        logger.error(f"Error in data pipeline execution: {str(e)}")
-        logger.error("Pipeline execution failed", exc_info=True)
-        if 'mlflow_tracker' in locals(): # locals() -> returns a dictionary of the current local variables
-            mlflow_tracker.end_run()
+        ProjectLogger.log_error_header(logger, "DATA PIPELINE FAILED - UNEXPECTED ERROR")
+        logger.error(f"Unexpected error during data pipeline: {str(e)}")
+        logger.error("Data pipeline failed", exc_info=True)
         raise
 
+
+def data_pipeline(
+    data_path: str = "./data/raw/TelcoCustomerChurnPrediction.csv",
+    target_column: str = 'Churn',
+    test_size: float = 0.2,
+    force_rebuild: bool = False
+) -> Dict[str, DataFrame]:
+    """
+    Legacy function wrapper for backward compatibility.
+    """
+    return data_pipeline_pyspark(
+        data_path=data_path,
+        target_column=target_column,
+        test_size=test_size,
+        force_rebuild=force_rebuild
+    )
+
+
 if __name__ == "__main__":
+    logger.info("Starting PySpark data pipeline execution")
+    
     try:
-        result = data_pipeline()
-        logger.info("Data pipeline completed successfully")
-        logger.info(f"Returned data shapes:")
-        logger.info(f"  - X_train: {result['X_train'].shape}")
-        logger.info(f"  - X_test: {result['X_test'].shape}")
-        logger.info(f"  - Y_train: {result['Y_train'].shape}")
-        logger.info(f"  - Y_test: {result['Y_test'].shape}")
+        result = data_pipeline_pyspark()
+        logger.info("Data pipeline execution completed successfully")
+        logger.info(f"Results: {list(result.keys())}")
+        
+        ProjectLogger.log_success_header(logger, "DATA PIPELINE MAIN EXECUTION COMPLETED")
+        
     except Exception as e:
-        logger.error(f"Data pipeline execution failed: {str(e)}")
+        ProjectLogger.log_error_header(logger, "DATA PIPELINE MAIN EXECUTION FAILED")
+        logger.error(f"Error: {str(e)}")
         raise

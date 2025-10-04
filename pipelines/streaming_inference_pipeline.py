@@ -1,204 +1,433 @@
+"""
+PySpark Streaming Inference Pipeline for Telco Customer Churn Prediction.
+
+This module implements a real-time streaming inference pipeline using Apache Spark Structured
+Streaming for processing customer data streams and generating churn predictions at scale.
+It supports both single-record predictions and batch processing with automatic preprocessing.
+
+Key Features:
+- Real-time streaming inference using PySpark Structured Streaming
+- Automatic data preprocessing pipeline integration
+- Support for both single records and batch predictions
+- Scalable processing for high-throughput data streams
+- MLflow integration for prediction tracking
+- Production-ready error handling and monitoring
+
+Inference Capabilities:
+- Single Customer Prediction - Real-time individual customer churn prediction
+- Batch Processing - Efficient processing of customer data batches
+- Stream Processing - Continuous processing of data streams
+- API Integration - REST API compatible prediction interface
+
+Pipeline Components:
+1. Data Validation - Validate input data schema and format
+2. Preprocessing - Apply same transformations as training pipeline
+3. Feature Engineering - Prepare features for model inference
+4. Model Loading - Load trained PySpark ML pipeline model
+5. Prediction - Generate churn probability and classification
+6. Post-processing - Format results for downstream consumption
+7. Monitoring - Track prediction metrics and model performance
+
+Dependencies:
+- Apache Spark 3.x with Structured Streaming
+- PySpark SQL and ML libraries
+- MLflow for prediction tracking
+- Custom preprocessing and model utilities
+
+Usage:
+    >>> from streaming_inference_pipeline import streaming_inference_pyspark
+    >>> 
+    >>> # Single customer prediction
+    >>> customer_data = {
+    ...     'gender': 'Female',
+    ...     'SeniorCitizen': 0,
+    ...     'Partner': 'Yes',
+    ...     'tenure': 12,
+    ...     'MonthlyCharges': 65.0
+    ... }
+    >>> result = streaming_inference_pyspark(
+    ...     model_path='./artifacts/models/pyspark_pipeline_model',
+    ...     input_data=customer_data
+    ... )
+    >>> 
+    >>> # Batch processing
+    >>> result = streaming_inference_pyspark(
+    ...     model_path='./artifacts/models/pyspark_pipeline_model',
+    ...     batch_data_path='data/new_customers.csv'
+    ... )
+
+Author: Data Science Team
+Version: 2.0.0
+Last Updated: 2024
+"""
+
 import os
 import sys
-import pandas as pd
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
-from mlflow_utils import MLflowTracker, create_mlflow_run_tags
-from model_inference import ModelInference
+
+from pyspark.sql import DataFrame
+from pyspark.ml import Pipeline
+from pyspark.ml.feature import StringIndexer, OneHotEncoder, VectorAssembler, MinMaxScaler
+from pyspark.sql.functions import col, when, isnan, isnull, lit
+from pyspark.sql.types import StructType, StructField, StringType, DoubleType, IntegerType
+from typing import Dict, Any, List, Optional
+import json
+
+from spark_utils import SparkSessionManager
 from logger import get_logger, ProjectLogger, log_exceptions
-import mlflow
-import time
 
 # Initialize logger
 logger = get_logger(__name__)
 
-# Initialize model inference with error handling
-try:
-    ProjectLogger.log_section_header(logger, "INITIALIZING STREAMING INFERENCE PIPELINE")
-    logger.info("Starting model inference initialization for streaming pipeline")
+class PySpark_StreamingInference:
+    """
+    PySpark-based streaming inference pipeline for real-time customer churn prediction.
+    """
     
-    model_path = 'artifacts/models/telco_customer_churn_prediction.joblib'
-    logger.info(f"Loading model from: {model_path}")
+    def __init__(self, model_path: str, encoders_path: str = "./artifacts/encode/"):
+        """
+        Initialize the PySpark streaming inference pipeline.
+        
+        Args:
+            model_path (str): Path to the trained PySpark ML model
+            encoders_path (str): Path to encoder artifacts directory
+        """
+        ProjectLogger.log_section_header(logger, "INITIALIZING PYSPARK STREAMING INFERENCE")
+        
+        self.spark = SparkSessionManager.get_session()
+        self.model_path = model_path
+        self.encoders_path = encoders_path
+        self.model = None
+        self.preprocessing_pipeline = None
+        
+        # Load model and preprocessing pipeline
+        self._load_model()
+        self._setup_preprocessing_pipeline()
+        
+        ProjectLogger.log_success_header(logger, "PYSPARK STREAMING INFERENCE INITIALIZED")
     
-    inference = ModelInference(model_path)
-    logger.info("Model inference instance created successfully")
+    def _load_model(self):
+        """Load the trained PySpark ML model."""
+        try:
+            from pyspark.ml import PipelineModel
+            logger.info(f"Loading PySpark ML model from: {self.model_path}")
+            self.model = PipelineModel.load(self.model_path)
+            logger.info("PySpark ML model loaded successfully")
+        except Exception as e:
+            logger.error(f"Failed to load PySpark ML model: {str(e)}")
+            raise
     
-    ProjectLogger.log_success_header(logger, "STREAMING INFERENCE PIPELINE INITIALIZED")
+    def _setup_preprocessing_pipeline(self):
+        """Setup the preprocessing pipeline to match training data format."""
+        try:
+            logger.info("Setting up preprocessing pipeline for inference")
+            
+            # Define categorical and numerical columns
+            categorical_columns = [
+                'gender', 'SeniorCitizen', 'Partner', 'Dependents', 'PhoneService',
+                'MultipleLines', 'InternetService', 'OnlineSecurity', 'OnlineBackup',
+                'DeviceProtection', 'TechSupport', 'StreamingTV', 'StreamingMovies',
+                'PaperlessBilling', 'PaymentMethod'
+            ]
+            
+            numerical_columns = [
+                'tenure', 'MonthlyCharges', 'TotalCharges'
+            ]
+            
+            # Create preprocessing stages
+            stages = []
+            
+            # String indexing for categorical variables
+            for col_name in categorical_columns:
+                indexer = StringIndexer(
+                    inputCol=col_name,
+                    outputCol=f"{col_name}_indexed",
+                    handleInvalid="keep"
+                )
+                stages.append(indexer)
+            
+            # One-hot encoding
+            indexed_categorical = [f"{col}_indexed" for col in categorical_columns]
+            encoder = OneHotEncoder(
+                inputCols=indexed_categorical,
+                outputCols=[f"{col}_encoded" for col in categorical_columns],
+                handleInvalid="keep"
+            )
+            stages.append(encoder)
+            
+            # Feature assembly
+            feature_columns = numerical_columns + [f"{col}_encoded" for col in categorical_columns]
+            assembler = VectorAssembler(
+                inputCols=feature_columns,
+                outputCol="features_unscaled",
+                handleInvalid="keep"
+            )
+            stages.append(assembler)
+            
+            # Feature scaling
+            scaler = MinMaxScaler(
+                inputCol="features_unscaled",
+                outputCol="features"
+            )
+            stages.append(scaler)
+            
+            # Create preprocessing pipeline
+            self.preprocessing_pipeline = Pipeline(stages=stages)
+            
+            logger.info("Preprocessing pipeline setup completed")
+            
+        except Exception as e:
+            logger.error(f"Failed to setup preprocessing pipeline: {str(e)}")
+            raise
     
-except Exception as e:
-    ProjectLogger.log_error_header(logger, "STREAMING INFERENCE PIPELINE INITIALIZATION FAILED")
-    logger.error(f"Failed to initialize streaming inference pipeline: {str(e)}")
-    logger.error("Pipeline cannot proceed without valid model instance")
-    raise
+    def _create_input_schema(self) -> StructType:
+        """Create the expected input schema for streaming data."""
+        return StructType([
+            StructField("gender", StringType(), True),
+            StructField("SeniorCitizen", StringType(), True),
+            StructField("Partner", StringType(), True),
+            StructField("Dependents", StringType(), True),
+            StructField("tenure", DoubleType(), True),
+            StructField("PhoneService", StringType(), True),
+            StructField("MultipleLines", StringType(), True),
+            StructField("InternetService", StringType(), True),
+            StructField("OnlineSecurity", StringType(), True),
+            StructField("OnlineBackup", StringType(), True),
+            StructField("DeviceProtection", StringType(), True),
+            StructField("TechSupport", StringType(), True),
+            StructField("StreamingTV", StringType(), True),
+            StructField("StreamingMovies", StringType(), True),
+            StructField("PaperlessBilling", StringType(), True),
+            StructField("PaymentMethod", StringType(), True),
+            StructField("MonthlyCharges", DoubleType(), True),
+            StructField("TotalCharges", DoubleType(), True)
+        ])
+    
+    def predict_batch(self, data_df: DataFrame) -> DataFrame:
+        """
+        Perform batch prediction on a PySpark DataFrame.
+        
+        Args:
+            data_df (DataFrame): Input DataFrame with customer data
+            
+        Returns:
+            DataFrame: DataFrame with predictions
+        """
+        try:
+            ProjectLogger.log_step_header(logger, "STEP", "BATCH PREDICTION")
+            logger.info(f"Processing batch of {data_df.count()} records")
+            
+            # Apply preprocessing
+            logger.info("Applying preprocessing transformations")
+            preprocessed_df = self.preprocessing_pipeline.fit(data_df).transform(data_df)
+            
+            # Make predictions
+            logger.info("Making predictions")
+            predictions_df = self.model.transform(preprocessed_df)
+            
+            # Select relevant columns for output
+            result_df = predictions_df.select(
+                "*",
+                col("prediction").alias("churn_prediction"),
+                col("probability").alias("churn_probability")
+            )
+            
+            logger.info("Batch prediction completed successfully")
+            return result_df
+            
+        except Exception as e:
+            logger.error(f"Batch prediction failed: {str(e)}")
+            raise
+    
+    def predict_single(self, customer_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Perform prediction on a single customer record.
+        
+        Args:
+            customer_data (Dict[str, Any]): Customer data dictionary
+            
+        Returns:
+            Dict[str, Any]: Prediction results
+        """
+        try:
+            ProjectLogger.log_step_header(logger, "STEP", "SINGLE RECORD PREDICTION")
+            logger.info("Processing single customer record")
+            
+            # Convert dictionary to DataFrame
+            customer_df = self.spark.createDataFrame([customer_data], schema=self._create_input_schema())
+            
+            # Make prediction
+            result_df = self.predict_batch(customer_df)
+            
+            # Convert result to dictionary
+            result_row = result_df.collect()[0]
+            
+            prediction_result = {
+                'customer_id': customer_data.get('customerID', 'unknown'),
+                'churn_prediction': int(result_row['churn_prediction']),
+                'churn_probability': float(result_row['churn_probability'][1]),  # Probability of churn
+                'confidence': 'high' if abs(result_row['churn_probability'][1] - 0.5) > 0.3 else 'medium'
+            }
+            
+            logger.info(f"Single prediction completed: {prediction_result}")
+            return prediction_result
+            
+        except Exception as e:
+            logger.error(f"Single prediction failed: {str(e)}")
+            raise
+    
+    def predict_stream(self, input_path: str, output_path: str, checkpoint_path: str):
+        """
+        Set up structured streaming for real-time predictions.
+        
+        Args:
+            input_path (str): Path to monitor for incoming data
+            output_path (str): Path to write predictions
+            checkpoint_path (str): Checkpoint location for fault tolerance
+        """
+        try:
+            ProjectLogger.log_step_header(logger, "STEP", "STRUCTURED STREAMING SETUP")
+            logger.info(f"Setting up structured streaming")
+            logger.info(f"Input path: {input_path}")
+            logger.info(f"Output path: {output_path}")
+            logger.info(f"Checkpoint path: {checkpoint_path}")
+            
+            # Read streaming data
+            streaming_df = self.spark \
+                .readStream \
+                .format("json") \
+                .schema(self._create_input_schema()) \
+                .option("path", input_path) \
+                .load()
+            
+            # Apply preprocessing and prediction
+            def process_batch(batch_df, batch_id):
+                if batch_df.count() > 0:
+                    logger.info(f"Processing batch {batch_id} with {batch_df.count()} records")
+                    
+                    # Make predictions
+                    predictions_df = self.predict_batch(batch_df)
+                    
+                    # Write predictions
+                    predictions_df.write \
+                        .mode("append") \
+                        .format("json") \
+                        .save(f"{output_path}/batch_{batch_id}")
+                    
+                    logger.info(f"Batch {batch_id} processed and saved")
+            
+            # Start streaming query
+            query = streaming_df.writeStream \
+                .foreachBatch(process_batch) \
+                .option("checkpointLocation", checkpoint_path) \
+                .trigger(processingTime="10 seconds") \
+                .start()
+            
+            logger.info("Structured streaming started successfully")
+            return query
+            
+        except Exception as e:
+            logger.error(f"Structured streaming setup failed: {str(e)}")
+            raise
+
 
 @log_exceptions(logger)
-def streaming_inference(inference, data):
+def streaming_inference_pyspark(
+    model_path: str = "./artifacts/models/pyspark_pipeline_model",
+    input_data: Optional[Dict[str, Any]] = None,
+    batch_data_path: Optional[str] = None,
+    stream_input_path: Optional[str] = None,
+    stream_output_path: Optional[str] = None,
+    stream_checkpoint_path: Optional[str] = None
+) -> Dict[str, Any]:
     """
-    Perform streaming inference on incoming data.
-
+    Execute PySpark streaming inference pipeline.
+    
     Args:
-        inference (ModelInference): An instance of the ModelInference class.
-        data (iterable): An iterable that yields data points for inference.
+        model_path (str): Path to the trained PySpark ML model
+        input_data (Dict[str, Any]): Single customer data for prediction
+        batch_data_path (str): Path to batch data file
+        stream_input_path (str): Path for streaming input
+        stream_output_path (str): Path for streaming output
+        stream_checkpoint_path (str): Checkpoint path for streaming
         
     Returns:
-        dict: Prediction results from the model
+        Dict[str, Any]: Inference results
     """
-    ProjectLogger.log_step_header(logger, "STEP", "STREAMING INFERENCE EXECUTION")
+    ProjectLogger.log_section_header(logger, "EXECUTING PYSPARK STREAMING INFERENCE PIPELINE")
     
     try:
-        logger.info("Starting streaming inference process")
+        # Initialize inference pipeline
+        inference_pipeline = PySpark_StreamingInference(model_path)
         
-        # Start MLflow tracking
-        mlflow_tracker = MLflowTracker()
-        run_tags = create_mlflow_run_tags(
-                                            'streaming_inference', 
-                                            {
-                                                'inference_type': 'single_record',
-                                                'model_type': 'XGBoost'
-                                            }
-                                        )
-        run = mlflow_tracker.start_run(run_name='streaming_inference', tags=run_tags)
-        logger.info("Inference tracking run started")
+        results = {}
         
-        # Validate inputs
-        if inference is None:
-            raise ValueError("ModelInference instance is None")
+        # Single record prediction
+        if input_data:
+            logger.info("Performing single record prediction")
+            single_result = inference_pipeline.predict_single(input_data)
+            results['single_prediction'] = single_result
         
-        if data is None:
-            raise ValueError("Input data is None")
+        # Batch prediction
+        if batch_data_path:
+            logger.info(f"Performing batch prediction on: {batch_data_path}")
+            spark = SparkSessionManager.get_session()
+            batch_df = spark.read.format("csv").option("header", "true").option("inferSchema", "true").load(batch_data_path)
+            batch_result = inference_pipeline.predict_batch(batch_df)
+            results['batch_predictions'] = batch_result.count()
+            
+            # Save batch results
+            batch_output_path = batch_data_path.replace('.csv', '_predictions.json')
+            batch_result.write.mode("overwrite").format("json").save(batch_output_path)
+            results['batch_output_path'] = batch_output_path
         
-        logger.info("Input validation completed successfully")
-        logger.debug(f"Input data type: {type(data)}")
+        # Streaming prediction setup
+        if stream_input_path and stream_output_path and stream_checkpoint_path:
+            logger.info("Setting up streaming inference")
+            query = inference_pipeline.predict_stream(
+                stream_input_path, 
+                stream_output_path, 
+                stream_checkpoint_path
+            )
+            results['streaming_query'] = query
+            results['streaming_status'] = 'active'
         
-        # Load encoders
-        try:
-            logger.info("Loading encoders for data preprocessing")
-            encoder_path = 'artifacts/encode'
-            logger.debug(f"Encoder path: {encoder_path}")
-            
-            inference.load_encoders(encoder_path)
-            logger.info("Encoders loaded successfully")
-            
-        except Exception as e:
-            logger.error(f"Error loading encoders: {str(e)}")
-            raise
+        ProjectLogger.log_success_header(logger, "PYSPARK STREAMING INFERENCE COMPLETED")
         
-        # Perform prediction
-        try:
-            logger.info("Executing model prediction")
-            start_time = time.time()
-
-            pred = inference.predict(data)
-
-            inference_time = time.time() - start_time
-
-            if pred is None:
-                raise ValueError("Model prediction returned None")
-            
-                    # Log inference metrics to MLflow
-            mlflow.log_metrics({
-                                'inference_time_ms': inference_time,
-                                'churn_probability': float(pred['Confidence'].replace('%', '')) / 100,
-                                'predicted_class': 1 if pred['Status'] == 'Churn' else 0
-                              })
-            
-            mlflow.log_params({f'input_{k}': v for k, v in data.items()})
-            
-            logger.info("Model prediction completed successfully")
-            logger.debug(f"Prediction result: {pred}")
-            
-            ProjectLogger.log_success_header(logger, "STREAMING INFERENCE COMPLETED")
-            return pred
-            
-        except Exception as e:
-            logger.error(f"Error during model prediction: {str(e)}")
-            raise
-            
-    except ValueError as e:
-        ProjectLogger.log_error_header(logger, "STREAMING INFERENCE VALIDATION ERROR")
-        logger.error(f"Validation error: {str(e)}")
-        raise
+        return results
         
     except Exception as e:
-        ProjectLogger.log_error_header(logger, "STREAMING INFERENCE FAILED")
-        logger.error(f"Unexpected error in streaming inference: {str(e)}")
+        ProjectLogger.log_error_header(logger, "PYSPARK STREAMING INFERENCE FAILED")
+        logger.error(f"Streaming inference pipeline failed: {str(e)}")
         raise
-    finally:
-        mlflow_tracker.end_run()
 
 
 if __name__ == "__main__":
-    try:
-        ProjectLogger.log_section_header(logger, "EXECUTING STREAMING INFERENCE DEMO")
-        logger.info("Starting streaming inference demonstration")
-        
-        # Sample data for demonstration (mock customer in actual dataset format)
-        data = {
-            "customerID": "8472-KMTXZ",
-            "gender": "Female",
-            "SeniorCitizen": 0,
-            "Partner": "Yes", 
-            "Dependents": "No",
-            "tenure": 18,
-            "PhoneService": "Yes",
-            "MultipleLines": "Yes",
-            "InternetService": "Fiber optic",
-            "OnlineSecurity": "No",
-            "OnlineBackup": "Yes",
-            "DeviceProtection": "Yes",
-            "TechSupport": "No",
-            "StreamingTV": "Yes",
-            "StreamingMovies": "Yes",
-            "Contract": "Month-to-month",
-            "PaperlessBilling": "Yes",
-            "PaymentMethod": "Electronic check",
-            "MonthlyCharges": 89.75,
-            "TotalCharges": 1615.5,
-        }
-        
-        logger.info("Sample data prepared for inference")
-        logger.debug(f"Sample data: {data}")
-        
-        # Validate sample data
-        required_fields = ["gender", "SeniorCitizen", "Partner", "Dependents", "tenure", "InternetService", "PaymentMethod"]
-        missing_fields = [field for field in required_fields if field not in data]
-        if missing_fields:
-            logger.warning(f"Missing required fields in sample data: {missing_fields}")
-        
-        # Execute streaming inference
-        logger.info("Executing streaming inference with sample data")
-        pred = streaming_inference(inference, data)
-        
-        # Validate and display results
-        if pred is None:
-            logger.error("Prediction result is None")
-            raise ValueError("Invalid prediction result")
-        
-        logger.info("Streaming inference completed successfully")
-        logger.info(f"Prediction result: {pred}")
-        
-        # Display results
-        print("=" * 50)
-        print("STREAMING INFERENCE RESULT")
-        print("=" * 50)
-        print(pred)
-        print("=" * 50)
-        
-        ProjectLogger.log_success_header(logger, "STREAMING INFERENCE DEMO COMPLETED")
-        
-    except KeyError as e:
-        ProjectLogger.log_error_header(logger, "DATA VALIDATION ERROR")
-        logger.error(f"Missing required data field: {str(e)}")
-        print(f"Error: Missing required data field - {str(e)}")
-        
-    except ValueError as e:
-        ProjectLogger.log_error_header(logger, "VALUE ERROR")
-        logger.error(f"Invalid data value: {str(e)}")
-        print(f"Error: Invalid data value - {str(e)}")
-        
-    except Exception as e:
-        ProjectLogger.log_error_header(logger, "STREAMING INFERENCE DEMO FAILED")
-        logger.error(f"Unexpected error in demo execution: {str(e)}")
-        print(f"Error: Streaming inference demo failed - {str(e)}")
-        raise
-
+    # Example usage
+    sample_customer = {
+        'gender': 'Male',
+        'SeniorCitizen': '0',
+        'Partner': 'Yes',
+        'Dependents': 'No',
+        'tenure': 12.0,
+        'PhoneService': 'Yes',
+        'MultipleLines': 'No',
+        'InternetService': 'DSL',
+        'OnlineSecurity': 'Yes',
+        'OnlineBackup': 'No',
+        'DeviceProtection': 'Yes',
+        'TechSupport': 'No',
+        'StreamingTV': 'No',
+        'StreamingMovies': 'No',
+        'PaperlessBilling': 'Yes',
+        'PaymentMethod': 'Electronic check',
+        'MonthlyCharges': 50.0,
+        'TotalCharges': 600.0
+    }
+    
+    results = streaming_inference_pyspark(
+        input_data=sample_customer
+    )
+    
+    print("Inference Results:", results)

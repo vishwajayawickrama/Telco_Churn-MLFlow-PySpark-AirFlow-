@@ -1,22 +1,20 @@
-# Core ML and Data Science Libraries
-pandas>=1.5.0
+# Core PySpark and Data Science Libraries
+pyspark>=3.4.0
+pandas>=1.5.0  # Still needed for some operations and compatibility
 numpy>=1.21.0
-scikit-learn>=1.1.0
 scipy>=1.9.0
-pyspark>=3.3.0
 
-# ML Pipeline (ZenML will be added back later)
-# zenml>=0.50.0
-# zenml[server]>=0.50.0
+# PySpark specific ML libraries
+# Note: Most ML functionality is included in PySpark ML
+# These are only for specific use cases or fallback operations
 
-# Model Libraries
-xgboost>=1.6.0
-lightgbm>=3.3.0
+# Distributed Computing and Spark Extensions
+delta-spark>=2.0.0  # For Delta Lake support
+koalas>=1.8.0  # Pandas API on PySpark (now part of PySpark as pandas API)
 
-# Visualization Libraries
-matplotlib>=3.5.0
-seaborn>=0.11.0
-plotly>=5.10.0
+# MLflow with PySpark support
+mlflow>=2.0.0
+mlflow-skinny>=2.0.0
 
 # Configuration and Utilities
 pyyaml>=6.0
@@ -32,8 +30,7 @@ fastapi>=0.95.0
 uvicorn>=0.20.0
 pydantic>=2.0.0,<2.11.2
 
-# Monitoring and Logging (MLflow will be added back later)
-# mlflow>=1.30.0
+# Monitoring and Logging
 wandb>=0.15.0
 
 # Testing
@@ -45,13 +42,21 @@ jupyter>=1.0.0
 ipykernel>=6.0.0
 black>=22.0.0
 flake8>=5.0.0
+findspark>=2.0.0  # For finding Spark installation
 
-# Optional: OpenAI for advanced imputation (if needed)
-openai>=0.27.0
-groq>=0.11.0
+# Visualization Libraries (reduced, as most analysis will be in Spark)
+matplotlib>=3.5.0
+seaborn>=0.11.0
+plotly>=5.10.0
 
-# Monitoring and Logging (MLflow will be added back later)
-mlflow>=1.30.0
+# Java/Scala dependencies (handled by Spark)
+# Note: Ensure JAVA_HOME is set and Java 8/11 is installed
+
+# Optional: For advanced operations
+py4j>=0.10.9  # Python-Java bridge (included with PySpark)
+
+# For Spark monitoring and debugging
+pyarrow>=5.0.0  # For better performance with Pandas UDF
 wandb>=0.15.0
 
 # Optional: Additional ML libraries

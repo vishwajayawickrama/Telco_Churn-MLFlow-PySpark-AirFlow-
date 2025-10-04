@@ -1,23 +1,17 @@
 import os
 import sys
 import json
-import pandas as pd
 from enum import Enum
-from typing import Dict, List, Union, Any
+from typing import Dict, List, Union, Any, Optional
 from abc import ABC, abstractmethod
-
-# Add utils to path for logger import
+from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql import functions as F
+from pyspark.ml.feature import StringIndexer, OneHotEncoder, IndexToString
+from pyspark.ml import Pipeline
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
 from logger import get_logger, ProjectLogger, log_exceptions
 
-# Initialize logger
 logger = get_logger(__name__)
-
-
-class VariableType(str, Enum):
-    """Enumeration for variable types in feature encoding."""
-    NOMINAL = 'nominal'
-    ORDINAL = 'ordinal'
 
 
 class FeatureEncodingStrategy(ABC):
@@ -26,158 +20,129 @@ class FeatureEncodingStrategy(ABC):
     """
 
     @abstractmethod
-    def encode(self, df: pd.DataFrame) -> pd.DataFrame:
+    def encode(self, df: DataFrame) -> DataFrame:
         """
         Encode features in the DataFrame.
         
         Args:
-            df (pd.DataFrame): Input DataFrame
+            df (DataFrame): Input DataFrame
             
         Returns:
-            pd.DataFrame: DataFrame with encoded features
+            DataFrame: DataFrame with encoded features
         """
         pass
+
+class VariableType(str, Enum):
+    """Enumeration of variable types."""
+    NOMINAL = 'nominal'
+    ORDINAL = 'ordinal'
 
 
 class NominalEncodingStrategy(FeatureEncodingStrategy):
     """
-    Nominal encoding strategy using label encoding for categorical variables.
+    Nominal encoding strategy using StringIndexer.
+    Creates numeric indices for categorical values.
     """
 
-    def __init__(self, nominal_columns: List[str]):
+    def __init__(self, nominal_columns: List[str], one_hot: bool = False, spark: Optional[SparkSession] = None):
         """
         Initialize nominal encoding strategy.
         
         Args:
-            nominal_columns (List[str]): List of nominal columns to encode
+            nominal_columns: List of column names to encode
+            one_hot: Whether to apply one-hot encoding after indexing
+            spark: Optional SparkSession
         """
+        from spark_utils import get_spark_session
+        self.spark = spark or get_spark_session()
         self.nominal_columns = nominal_columns
-        self.encoder_dict = {}
+        self.one_hot = one_hot
+        self.encoder_dicts = {}
+        self.indexers = {}
+        self.encoders = {}
+        os.makedirs('artifacts/encode', exist_ok=True)
         
         ProjectLogger.log_section_header(logger, "INITIALIZING NOMINAL ENCODING STRATEGY")
         logger.info(f"Nominal columns to encode: {len(self.nominal_columns)}")
-        
-        for column in self.nominal_columns:
-            logger.info(f"  - {column}")
-        
-        # Ensure artifacts directory exists
-        try:
-            os.makedirs('artifacts/encode', exist_ok=True)
-            logger.info("Artifacts/encode directory ready")
-        except Exception as e:
-            logger.warning(f"Could not create artifacts directory: {str(e)}")
+        logger.info(f"One-hot encoding: {one_hot}")
 
     @log_exceptions(logger)
-    def encode(self, df: pd.DataFrame) -> pd.DataFrame:
+    def encode(self, df: DataFrame) -> DataFrame:
         """
         Encode nominal variables using label encoding.
         
         Args:
-            df (pd.DataFrame): Input DataFrame
+            df (DataFrame): Input DataFrame
             
         Returns:
-            pd.DataFrame: DataFrame with encoded nominal variables
-            
-        Raises:
-            ValueError: If DataFrame is empty or columns don't exist
-            Exception: For any unexpected errors
+            DataFrame: DataFrame with encoded nominal variables
         """
         ProjectLogger.log_step_header(logger, "STEP", "ENCODING NOMINAL VARIABLES")
         
         try:
+            df_encoded = df
+            stages = []
             # Validate input
-            if df.empty:
-                raise ValueError("Input DataFrame is empty")
+
+
             
-            if not self.nominal_columns:
-                logger.warning("No nominal columns specified for encoding")
-                return df.copy()
-            
-            logger.info(f"Starting nominal encoding for {len(self.nominal_columns)} columns")
-            logger.info(f"Initial DataFrame shape: {df.shape}")
-            
-            # Create copy to avoid modifying original
-            df_result = df.copy()
+            # Create pipeline stages for transformations
+            df_result = df_encoded
             
             # Track encoding results
             encoding_summary = {}
             
-            for i, column in enumerate(self.nominal_columns, 1):
-                logger.info(f"Processing column {i}/{len(self.nominal_columns)}: {column}")
-                
-                # Check if column exists
-                if column not in df_result.columns:
-                    logger.warning(f"Column '{column}' not found in DataFrame, skipping")
-                    continue
-                
+            for column in self.nominal_columns:
+                logger.info(f"\n--- Processing column: {column} ---")
+
+                # Validate column existence
+                missing_count = df_encoded.filter(F.col(column).isNull()).count()
+                if missing_count > 0:
+                    logger.warning(f"Column has {missing_count} missing values before encoding")
+
+                # Fill missing values with a placeholder
+                df_encoded = df_encoded.fillna({column: "MISSING"})
+
                 # Get unique values
-                unique_values = df_result[column].unique()
-                unique_count = len(unique_values)
+                unique_values = df_encoded.select(column).distinct().count()
                 
-                logger.info(f"  - Unique values in '{column}': {unique_count}")
-                
-                # Handle missing values
-                has_missing = df_result[column].isnull().any()
-                if has_missing:
-                    missing_count = df_result[column].isnull().sum()
-                    logger.warning(f"  - Missing values in '{column}': {missing_count}")
-                
-                # Create encoding mapping
-                encoder_dict = {str(value): i for i, value in enumerate(unique_values)}
-                mapping_dict = {value: i for i, value in enumerate(unique_values)}
-                
-                # Store encoder for this column
-                self.encoder_dict[column] = mapping_dict
-                
-                # Save encoder to file
-                try:
-                    encoder_path = os.path.join('artifacts/encode', f"{column}_encoder.json")
-                    with open(encoder_path, "w") as f:
-                        json.dump(encoder_dict, f, indent=2)
-                    logger.info(f"  - Encoder saved to: {encoder_path}")
-                except Exception as e:
-                    logger.warning(f"  - Could not save encoder for '{column}': {str(e)}")
-                
-                # Apply encoding
-                original_type = df_result[column].dtype
-                df_result[column] = df_result[column].map(mapping_dict)
-                new_type = df_result[column].dtype
-                
-                # Check for unmapped values (NaN after mapping)
-                unmapped_count = df_result[column].isnull().sum() - (missing_count if has_missing else 0)
-                if unmapped_count > 0:
-                    logger.warning(f"  - Unmapped values after encoding: {unmapped_count}")
-                
-                # Store encoding summary
-                encoding_summary[column] = {
-                    'unique_values': unique_count,
-                    'original_type': str(original_type),
-                    'new_type': str(new_type),
-                    'missing_values': missing_count if has_missing else 0,
-                    'unmapped_values': unmapped_count,
-                    'encoder_size': len(mapping_dict)
-                }
-                
-                logger.info(f"  - Successfully encoded '{column}': {original_type} -> {new_type}")
+                logger.info(f"  Unique values: {unique_values}")
+
+                """
+                    StringIndexer: Creates a new column with indexed values. The most frequent value gets index 0.
+                    Parameters:
+                        inputCol: Name of the input column
+                        outputCol: Name of the output indexed column
+                        handleInvalid: How to handle invalid data (e.g., unseen labels)
+                """
             
-            # Log encoding summary
-            logger.info("Nominal encoding summary:")
-            for column, summary in encoding_summary.items():
-                logger.info(f"  - {column}: {summary['unique_values']} unique -> {summary['encoder_size']} mappings")
-                if summary['unmapped_values'] > 0:
-                    logger.warning(f"    WARNING: {summary['unmapped_values']} unmapped values")
-            
-            logger.info(f"Final DataFrame shape: {df_result.shape}")
-            logger.info(f"Encoded {len(encoding_summary)} nominal columns successfully")
+                # Create StringIndexer
+                indexer = StringIndexer(
+                    inputCol=column,
+                    outputCol=f"{column}_index",
+                    handleInvalid="keep"  # Keeps unseen labels as index = numLabels
+                )
+
+                # Fit the indexer
+                indexer_model = indexer.fit(df_encoded)
+
+                self.indexers[column] = indexer_model
+
+                # Get the mapping
+                labels = indexer_model.labels
+                encoder_dict = {label: idx for idx, label in enumerate(labels)}
+                self.encoder_dicts[column] = encoder_dict
+
+                
+
+                
+
+                
             
             ProjectLogger.log_success_header(logger, "NOMINAL ENCODING COMPLETED")
             
             return df_result
             
-        except ValueError as e:
-            ProjectLogger.log_error_header(logger, "DATA VALIDATION ERROR")
-            logger.error(f"Data validation error: {str(e)}")
-            raise
             
         except Exception as e:
             ProjectLogger.log_error_header(logger, "UNEXPECTED ERROR IN NOMINAL ENCODING")
@@ -204,22 +169,22 @@ class OrdinalEncodingStrategy(FeatureEncodingStrategy):
         logger.info(f"Ordinal columns to encode: {len(self.ordinal_mappings)}")
 
     @log_exceptions(logger)
-    def encode(self, df: pd.DataFrame) -> pd.DataFrame:
+    def encode(self, df: DataFrame) -> DataFrame:
         """
         Encode ordinal variables using custom mappings.
         
         Args:
-            df (pd.DataFrame): Input DataFrame
+            df (DataFrame): Input PySpark DataFrame
             
         Returns:
-            pd.DataFrame: DataFrame with encoded ordinal variables
+            DataFrame: DataFrame with encoded ordinal variables
 
         """
         ProjectLogger.log_step_header(logger, "STEP", "ENCODING ORDINAL VARIABLES")
         
         try:
             # Validate input
-            if df.empty:
+            if df.count() == 0:
                 raise ValueError("Input DataFrame is empty")
             
             if not self.ordinal_mappings:

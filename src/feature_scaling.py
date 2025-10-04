@@ -1,323 +1,382 @@
-import os
-import sys
-import pandas as pd
-import numpy as np
-from enum import Enum
-from typing import List, Optional, Union
+"""
+Feature scaling module for PySpark DataFrame operations.
+Provides various scaling strategies including Min-Max and Standard scaling.
+"""
+
 from abc import ABC, abstractmethod
-from sklearn.preprocessing import MinMaxScaler, StandardScaler
+from enum import Enum
+from typing import List, Union, Optional
+import logging
 
-# Add utils to path for logger import
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
-from logger import get_logger, ProjectLogger, log_exceptions
+from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql.types import DoubleType
+from pyspark.sql import functions as F
+from pyspark.ml.feature import MinMaxScaler, StandardScaler, VectorAssembler
+from pyspark.ml import Pipeline
 
-# Initialize logger
-logger = get_logger(__name__)
+from utils.logger import ProjectLogger
+from utils.config import log_exceptions
+from utils.spark_utils import get_spark_session
+
+# Configure logger
+logger = logging.getLogger(__name__)
 
 
-class ScalingType(str, Enum):
-    """Enumeration for scaling types."""
+class ScalingType(Enum):
+    """Enumeration for different scaling types."""
     MINMAX = 'minmax'
     STANDARD = 'standard'
 
 
 class FeatureScalingStrategy(ABC):
     """
-    Abstract base class for feature scaling strategies.
+    Abstract base class for feature scaling strategies using PySpark.
     """
+    
+    def __init__(self, spark: Optional[SparkSession] = None):
+        """Initialize with SparkSession."""
+        self.spark = spark or get_spark_session()
 
     @abstractmethod
-    def scale(self, df: pd.DataFrame, columns_to_scale: List[str]) -> pd.DataFrame:
+    def scale(self, df: DataFrame, columns_to_scale: List[str]) -> DataFrame:
         """
         Scale features in the DataFrame.
         
         Args:
-            df (pd.DataFrame): Input DataFrame
+            df (DataFrame): Input PySpark DataFrame
             columns_to_scale (List[str]): Columns to scale
             
         Returns:
-            pd.DataFrame: DataFrame with scaled features
+            DataFrame: DataFrame with scaled features
         """
         pass
 
 
 class MinMaxScalingStrategy(FeatureScalingStrategy):
     """
-    Min-Max scaling strategy using sklearn's MinMaxScaler.
+    Min-Max scaling strategy using PySpark ML MinMaxScaler.
     """
     
-    def __init__(self, feature_range: tuple = (0, 1)):
+    def __init__(self, min_value: float = 0.0, max_value: float = 1.0, spark: Optional[SparkSession] = None):
         """
         Initialize Min-Max scaling strategy.
         
         Args:
-            feature_range (tuple): Range for scaled features (default: (0, 1))
+            min_value (float): Minimum value for scaled features (default: 0.0)
+            max_value (float): Maximum value for scaled features (default: 1.0)
+            spark: Optional SparkSession
         """
-        self.scaler = MinMaxScaler(feature_range=feature_range)
-        self.fitted = False
-        self.feature_range = feature_range
+        super().__init__(spark)
+        self.min_value = min_value
+        self.max_value = max_value
+        self.fitted_scalers = {}
         self.scaling_stats = {}
         
         ProjectLogger.log_section_header(logger, "INITIALIZING MIN-MAX SCALING STRATEGY")
-        logger.info(f"Feature range: {self.feature_range}")
-        logger.info("Method: (X - min) / (max - min) * (range_max - range_min) + range_min")
+        logger.info(f"Feature range: ({self.min_value}, {self.max_value})")
+        logger.info("Method: (X - min) / (max - min) * (max_value - min_value) + min_value")
 
     @log_exceptions(logger)
-    def scale(self, df: pd.DataFrame, columns_to_scale: List[str]) -> pd.DataFrame:
+    def scale(self, df: DataFrame, columns_to_scale: List[str]) -> DataFrame:
         """
         Apply Min-Max scaling to specified columns.
         
         Args:
-            df (pd.DataFrame): Input DataFrame
+            df (DataFrame): Input PySpark DataFrame
             columns_to_scale (List[str]): Columns to scale
             
         Returns:
-            pd.DataFrame: DataFrame with scaled features
-            
-        Raises:
-            ValueError: If DataFrame is empty or columns don't exist
-            Exception: For any unexpected errors
+            DataFrame: DataFrame with scaled features
         """
         ProjectLogger.log_step_header(logger, "STEP", "APPLYING MIN-MAX SCALING")
         
         try:
             # Validate input
-            if df.empty:
+            if df.count() == 0:
                 raise ValueError("Input DataFrame is empty")
             
             if not columns_to_scale:
                 logger.warning("No columns specified for scaling")
-                return df.copy()
+                return df
             
             logger.info(f"Scaling {len(columns_to_scale)} columns: {columns_to_scale}")
-            logger.info(f"Initial DataFrame shape: {df.shape}")
-            
-            # Create copy to avoid modifying original
-            df_result = df.copy()
+            logger.info(f"Initial DataFrame row count: {df.count()}")
             
             # Validate columns exist
-            missing_columns = [col for col in columns_to_scale if col not in df_result.columns]
+            available_columns = df.columns
+            missing_columns = [col for col in columns_to_scale if col not in available_columns]
             if missing_columns:
                 logger.warning(f"Columns not found: {missing_columns}")
-                existing_columns = [col for col in columns_to_scale if col in df_result.columns]
+                existing_columns = [col for col in columns_to_scale if col in available_columns]
                 logger.info(f"Using existing columns: {existing_columns}")
             else:
                 existing_columns = columns_to_scale
             
             if not existing_columns:
                 logger.warning("No valid columns for scaling")
-                return df_result
+                return df
             
-            # Special handling for TotalCharges column (if present)
+            # Handle TotalCharges conversion if present
+            df_result = df
             if "TotalCharges" in existing_columns:
                 logger.info("Converting TotalCharges to numeric (handling potential string values)")
-                original_type = df_result["TotalCharges"].dtype
-                df_result["TotalCharges"] = pd.to_numeric(df_result["TotalCharges"], errors="coerce")
+                df_result = df_result.withColumn("TotalCharges", 
+                    F.when(F.col("TotalCharges").rlike("^[0-9.]+$"), 
+                           F.col("TotalCharges").cast(DoubleType()))
+                    .otherwise(F.lit(None).cast(DoubleType())))
+            
+            # Apply scaling to each column
+            for column in existing_columns:
+                logger.info(f"Scaling column: {column}")
                 
-                # Check for conversion issues
-                conversion_issues = df_result["TotalCharges"].isnull().sum() - df["TotalCharges"].isnull().sum()
-                if conversion_issues > 0:
-                    logger.warning(f"TotalCharges conversion created {conversion_issues} NaN values")
+                # Ensure column is numeric
+                df_result = df_result.withColumn(column, F.col(column).cast(DoubleType()))
                 
-                logger.info(f"TotalCharges converted: {original_type} -> {df_result['TotalCharges'].dtype}")
-            
-            # Prepare data for scaling
-            scaling_data = df_result[existing_columns].copy()
-            
-            # Log original statistics
-            logger.info("Original data statistics:")
-            for col in existing_columns:
-                if pd.api.types.is_numeric_dtype(scaling_data[col]):
-                    stats = {
-                        'min': scaling_data[col].min(),
-                        'max': scaling_data[col].max(),
-                        'mean': scaling_data[col].mean(),
-                        'std': scaling_data[col].std(),
-                        'missing': scaling_data[col].isnull().sum()
-                    }
-                    logger.info(f"  - {col}: min={stats['min']:.3f}, max={stats['max']:.3f}, "
-                              f"mean={stats['mean']:.3f}, std={stats['std']:.3f}, missing={stats['missing']}")
-                    self.scaling_stats[col] = stats
-                else:
-                    logger.warning(f"  - {col}: Not numeric, skipping scaling")
-                    existing_columns.remove(col)
-            
-            if not existing_columns:
-                logger.warning("No numeric columns available for scaling")
-                return df_result
-            
-            # Handle missing values before scaling
-            missing_values = scaling_data[existing_columns].isnull().sum().sum()
-            if missing_values > 0:
-                logger.warning(f"Found {missing_values} missing values in columns to scale")
-                logger.warning("Missing values may affect scaling results")
-            
-            # Apply scaling
-            logger.info("Applying Min-Max scaling transformation...")
-            scaled_data = self.scaler.fit_transform(scaling_data[existing_columns])
-            self.fitted = True
-            
-            # Update DataFrame with scaled values
-            df_result[existing_columns] = scaled_data
-            
-            # Log scaled statistics
-            logger.info("Scaled data statistics:")
-            for i, col in enumerate(existing_columns):
-                scaled_col = scaled_data[:, i]
-                logger.info(f"  - {col}: min={scaled_col.min():.3f}, max={scaled_col.max():.3f}, "
-                          f"mean={scaled_col.mean():.3f}, std={scaled_col.std():.3f}")
-            
-            # Verify scaling range
-            logger.info(f"Scaling verification (should be in range {self.feature_range}):")
-            for col in existing_columns:
-                col_min = df_result[col].min()
-                col_max = df_result[col].max()
-                in_range = (self.feature_range[0] <= col_min <= self.feature_range[1] and 
-                           self.feature_range[0] <= col_max <= self.feature_range[1])
-                logger.info(f"  - {col}: [{col_min:.3f}, {col_max:.3f}] - {'✓' if in_range else '✗'}")
+                # Create vector assembler for single column
+                assembler = VectorAssembler(
+                    inputCols=[column],
+                    outputCol=f"{column}_vector",
+                    handleInvalid="keep"
+                )
+                
+                # Create MinMax scaler
+                scaler = MinMaxScaler(
+                    inputCol=f"{column}_vector",
+                    outputCol=f"{column}_scaled_vector",
+                    min=self.min_value,
+                    max=self.max_value
+                )
+                
+                # Create pipeline
+                pipeline = Pipeline(stages=[assembler, scaler])
+                pipeline_model = pipeline.fit(df_result)
+                
+                # Transform data
+                df_scaled = pipeline_model.transform(df_result)
+                
+                # Extract scaled values from vector
+                df_result = df_scaled.withColumn(
+                    column,
+                    F.col(f"{column}_scaled_vector").getItem(0)
+                ).drop(f"{column}_vector", f"{column}_scaled_vector")
+                
+                # Store scaler for future use
+                self.fitted_scalers[column] = pipeline_model
+                
+                # Calculate and store statistics
+                stats = df_result.select(
+                    F.min(column).alias("min"),
+                    F.max(column).alias("max"),
+                    F.mean(column).alias("mean"),
+                    F.stddev(column).alias("std")
+                ).collect()[0]
+                
+                self.scaling_stats[column] = {
+                    "min": stats["min"],
+                    "max": stats["max"], 
+                    "mean": stats["mean"],
+                    "std": stats["std"]
+                }
+                
+                logger.info(f"Column {column} scaled successfully")
+                logger.info(f"  Range: [{stats['min']:.4f}, {stats['max']:.4f}]")
+                logger.info(f"  Mean: {stats['mean']:.4f}, Std: {stats['std']:.4f}")
             
             logger.info(f"Min-Max scaling completed for {len(existing_columns)} columns")
-            logger.info(f"Final DataFrame shape: {df_result.shape}")
-            
             ProjectLogger.log_success_header(logger, "MIN-MAX SCALING COMPLETED")
             
             return df_result
             
-        except ValueError as e:
-            ProjectLogger.log_error_header(logger, "DATA VALIDATION ERROR")
-            logger.error(f"Data validation error: {str(e)}")
-            raise
-            
         except Exception as e:
-            ProjectLogger.log_error_header(logger, "UNEXPECTED ERROR IN MIN-MAX SCALING")
-            logger.error(f"Unexpected error: {str(e)}")
+            ProjectLogger.log_error_header(logger, "MIN-MAX SCALING FAILED")
+            logger.error(f"Error during Min-Max scaling: {str(e)}")
             raise
-    
-    def get_scaler(self):
-        """
-        Get the fitted scaler object.
-        
-        Returns:
-            MinMaxScaler: The fitted scaler
-            
-        Raises:
-            RuntimeError: If scaler is not fitted yet
-        """
-        if not self.fitted:
-            raise RuntimeError("Scaler has not been fitted yet. Call scale() first.")
-        return self.scaler
-    
-    def get_scaling_stats(self) -> dict:
-        """
-        Get scaling statistics for all processed columns.
-        
-        Returns:
-            dict: Dictionary containing scaling statistics
-        """
-        return self.scaling_stats
 
 
 class StandardScalingStrategy(FeatureScalingStrategy):
     """
-    Standard scaling strategy using sklearn's StandardScaler.
+    Standard scaling (Z-score normalization) strategy using PySpark ML StandardScaler.
     """
     
-    def __init__(self):
-        """Initialize Standard scaling strategy."""
-        self.scaler = StandardScaler()
-        self.fitted = False
+    def __init__(self, with_mean: bool = True, with_std: bool = True, spark: Optional[SparkSession] = None):
+        """
+        Initialize Standard scaling strategy.
+        
+        Args:
+            with_mean (bool): Whether to center data at mean (default: True)
+            with_std (bool): Whether to scale to unit variance (default: True)
+            spark: Optional SparkSession
+        """
+        super().__init__(spark)
+        self.with_mean = with_mean
+        self.with_std = with_std
+        self.fitted_scalers = {}
         self.scaling_stats = {}
         
         ProjectLogger.log_section_header(logger, "INITIALIZING STANDARD SCALING STRATEGY")
+        logger.info(f"Center data (subtract mean): {self.with_mean}")
+        logger.info(f"Scale to unit variance: {self.with_std}")
         logger.info("Method: (X - mean) / std")
 
     @log_exceptions(logger)
-    def scale(self, df: pd.DataFrame, columns_to_scale: List[str]) -> pd.DataFrame:
+    def scale(self, df: DataFrame, columns_to_scale: List[str]) -> DataFrame:
         """
         Apply Standard scaling to specified columns.
         
         Args:
-            df (pd.DataFrame): Input DataFrame
+            df (DataFrame): Input PySpark DataFrame
             columns_to_scale (List[str]): Columns to scale
             
         Returns:
-            pd.DataFrame: DataFrame with scaled features
+            DataFrame: DataFrame with scaled features
         """
         ProjectLogger.log_step_header(logger, "STEP", "APPLYING STANDARD SCALING")
         
         try:
             # Validate input
-            if df.empty:
+            if df.count() == 0:
                 raise ValueError("Input DataFrame is empty")
             
             if not columns_to_scale:
                 logger.warning("No columns specified for scaling")
-                return df.copy()
+                return df
             
             logger.info(f"Scaling {len(columns_to_scale)} columns: {columns_to_scale}")
             
-            # Create copy and apply scaling logic similar to MinMaxScaling
-            df_result = df.copy()
-            
             # Validate columns exist
-            existing_columns = [col for col in columns_to_scale if col in df_result.columns]
+            available_columns = df.columns
+            existing_columns = [col for col in columns_to_scale if col in available_columns]
+            missing_columns = [col for col in columns_to_scale if col not in available_columns]
+            
+            if missing_columns:
+                logger.warning(f"Columns not found: {missing_columns}")
             
             if not existing_columns:
                 logger.warning("No valid columns for scaling")
-                return df_result
+                return df
             
-            # Apply scaling
-            scaled_data = self.scaler.fit_transform(df_result[existing_columns])
-            self.fitted = True
+            # Handle TotalCharges conversion if present
+            df_result = df
+            if "TotalCharges" in existing_columns:
+                logger.info("Converting TotalCharges to numeric")
+                df_result = df_result.withColumn("TotalCharges", 
+                    F.when(F.col("TotalCharges").rlike("^[0-9.]+$"), 
+                           F.col("TotalCharges").cast(DoubleType()))
+                    .otherwise(F.lit(None).cast(DoubleType())))
             
-            # Update DataFrame
-            df_result[existing_columns] = scaled_data
+            # Apply scaling to each column
+            for column in existing_columns:
+                logger.info(f"Scaling column: {column}")
+                
+                # Ensure column is numeric
+                df_result = df_result.withColumn(column, F.col(column).cast(DoubleType()))
+                
+                # Create vector assembler for single column
+                assembler = VectorAssembler(
+                    inputCols=[column],
+                    outputCol=f"{column}_vector",
+                    handleInvalid="keep"
+                )
+                
+                # Create Standard scaler
+                scaler = StandardScaler(
+                    inputCol=f"{column}_vector",
+                    outputCol=f"{column}_scaled_vector",
+                    withMean=self.with_mean,
+                    withStd=self.with_std
+                )
+                
+                # Create pipeline
+                pipeline = Pipeline(stages=[assembler, scaler])
+                pipeline_model = pipeline.fit(df_result)
+                
+                # Transform data
+                df_scaled = pipeline_model.transform(df_result)
+                
+                # Extract scaled values from vector
+                df_result = df_scaled.withColumn(
+                    column,
+                    F.col(f"{column}_scaled_vector").getItem(0)
+                ).drop(f"{column}_vector", f"{column}_scaled_vector")
+                
+                # Store scaler for future use
+                self.fitted_scalers[column] = pipeline_model
+                
+                # Calculate and store statistics
+                stats = df_result.select(
+                    F.min(column).alias("min"),
+                    F.max(column).alias("max"),
+                    F.mean(column).alias("mean"),
+                    F.stddev(column).alias("std")
+                ).collect()[0]
+                
+                self.scaling_stats[column] = {
+                    "min": stats["min"],
+                    "max": stats["max"],
+                    "mean": stats["mean"],
+                    "std": stats["std"]
+                }
+                
+                logger.info(f"Column {column} scaled successfully")
+                logger.info(f"  Mean: {stats['mean']:.4f}, Std: {stats['std']:.4f}")
             
             logger.info(f"Standard scaling completed for {len(existing_columns)} columns")
-            
             ProjectLogger.log_success_header(logger, "STANDARD SCALING COMPLETED")
             
             return df_result
             
         except Exception as e:
-            ProjectLogger.log_error_header(logger, "UNEXPECTED ERROR IN STANDARD SCALING")
-            logger.error(f"Unexpected error: {str(e)}")
+            ProjectLogger.log_error_header(logger, "STANDARD SCALING FAILED")
+            logger.error(f"Error during Standard scaling: {str(e)}")
             raise
-    
-    def get_scaler(self):
-        """Get the fitted scaler object."""
-        if not self.fitted:
-            raise RuntimeError("Scaler has not been fitted yet. Call scale() first.")
-        return self.scaler
 
 
 class FeatureScaler:
     """
-    Main class for handling feature scaling operations.
+    Main feature scaling class that uses different scaling strategies.
     """
     
-    def __init__(self, strategy: FeatureScalingStrategy):
+    def __init__(self, scaling_type: Union[str, ScalingType] = ScalingType.MINMAX, spark: Optional[SparkSession] = None):
         """
-        Initialize feature scaler with a specific strategy.
+        Initialize feature scaler with specified strategy.
         
         Args:
-            strategy (FeatureScalingStrategy): Scaling strategy to use
+            scaling_type: Type of scaling to apply ('minmax' or 'standard')
+            spark: Optional SparkSession
         """
-        self.strategy = strategy
+        self.spark = spark or get_spark_session()
+        self.scaling_type = ScalingType(scaling_type) if isinstance(scaling_type, str) else scaling_type
+        self.strategy = self._create_strategy()
         
-        ProjectLogger.log_section_header(logger, "INITIALIZING FEATURE SCALER")
-        logger.info(f"Using strategy: {strategy.__class__.__name__}")
+        ProjectLogger.log_section_header(logger, f"INITIALIZING FEATURE SCALER ({self.scaling_type.value.upper()})")
+
+    def _create_strategy(self) -> FeatureScalingStrategy:
+        """Create scaling strategy based on type."""
+        if self.scaling_type == ScalingType.MINMAX:
+            return MinMaxScalingStrategy(spark=self.spark)
+        elif self.scaling_type == ScalingType.STANDARD:
+            return StandardScalingStrategy(spark=self.spark)
+        else:
+            raise ValueError(f"Unknown scaling type: {self.scaling_type}")
 
     @log_exceptions(logger)
-    def scale_features(self, df: pd.DataFrame, columns_to_scale: List[str]) -> pd.DataFrame:
+    def scale_features(self, df: DataFrame, columns_to_scale: List[str]) -> DataFrame:
         """
         Scale features using the configured strategy.
         
         Args:
-            df (pd.DataFrame): Input DataFrame
+            df (DataFrame): Input PySpark DataFrame
             columns_to_scale (List[str]): Columns to scale
             
         Returns:
-            pd.DataFrame: DataFrame with scaled features
+            DataFrame: DataFrame with scaled features
         """
         return self.strategy.scale(df, columns_to_scale)
+    
+    def get_scaling_stats(self) -> dict:
+        """Get scaling statistics."""
+        return getattr(self.strategy, 'scaling_stats', {})
+    
+    def get_fitted_scalers(self) -> dict:
+        """Get fitted scaler models."""
+        return getattr(self.strategy, 'fitted_scalers', {})
