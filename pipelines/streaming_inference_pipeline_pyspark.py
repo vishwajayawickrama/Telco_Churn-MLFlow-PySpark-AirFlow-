@@ -1,3 +1,66 @@
+"""
+PySpark Streaming Inference Pipeline for Telco Customer Churn Prediction.
+
+This module implements a real-time streaming inference pipeline using Apache Spark Structured
+Streaming for processing customer data streams and generating churn predictions at scale.
+It supports both single-record predictions and batch processing with automatic preprocessing.
+
+Key Features:
+- Real-time streaming inference using PySpark Structured Streaming
+- Automatic data preprocessing pipeline integration
+- Support for both single records and batch predictions
+- Scalable processing for high-throughput data streams
+- MLflow integration for prediction tracking
+- Production-ready error handling and monitoring
+
+Inference Capabilities:
+- Single Customer Prediction - Real-time individual customer churn prediction
+- Batch Processing - Efficient processing of customer data batches
+- Stream Processing - Continuous processing of data streams
+- API Integration - REST API compatible prediction interface
+
+Pipeline Components:
+1. Data Validation - Validate input data schema and format
+2. Preprocessing - Apply same transformations as training pipeline
+3. Feature Engineering - Prepare features for model inference
+4. Model Loading - Load trained PySpark ML pipeline model
+5. Prediction - Generate churn probability and classification
+6. Post-processing - Format results for downstream consumption
+7. Monitoring - Track prediction metrics and model performance
+
+Dependencies:
+- Apache Spark 3.x with Structured Streaming
+- PySpark SQL and ML libraries
+- MLflow for prediction tracking
+- Custom preprocessing and model utilities
+
+Usage:
+    >>> from streaming_inference_pipeline_pyspark import streaming_inference_pyspark
+    >>> 
+    >>> # Single customer prediction
+    >>> customer_data = {
+    ...     'gender': 'Female',
+    ...     'SeniorCitizen': 0,
+    ...     'Partner': 'Yes',
+    ...     'tenure': 12,
+    ...     'MonthlyCharges': 65.0
+    ... }
+    >>> result = streaming_inference_pyspark(
+    ...     model_path='./artifacts/models/pyspark_pipeline_model',
+    ...     input_data=customer_data
+    ... )
+    >>> 
+    >>> # Batch processing
+    >>> result = streaming_inference_pyspark(
+    ...     model_path='./artifacts/models/pyspark_pipeline_model',
+    ...     batch_data_path='data/new_customers.csv'
+    ... )
+
+Author: Data Science Team
+Version: 2.0.0
+Last Updated: 2024
+"""
+
 import os
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))

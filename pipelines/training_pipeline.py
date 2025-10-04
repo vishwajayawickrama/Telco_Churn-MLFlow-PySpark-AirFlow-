@@ -1,14 +1,83 @@
+"""
+Unified Training Pipeline for Telco Customer Churn Prediction.
+
+This module provides a unified interface for both PySpark MLlib and scikit-learn
+implementations of the machine learning training pipeline. It supports multiple
+algorithms with comprehensive model evaluation and experiment tracking.
+
+Key Features:
+- Dual Implementation Support - Choose between PySpark MLlib and scikit-learn
+- Multiple ML Algorithms - XGBoost, RandomForest, GBT, LogisticRegression
+- Hyperparameter Tuning - Automated parameter optimization
+- Comprehensive Evaluation - Multiple metrics and model performance analysis
+- MLflow Integration - Complete experiment tracking and model registry
+- Production Ready - Model persistence and deployment preparation
+
+Algorithm Support:
+1. XGBoost Classifier (Default):
+   - Excellent performance on tabular data
+   - Built-in feature importance
+   - Handles missing values automatically
+   - Memory efficient gradient boosting
+
+2. Random Forest:
+   - Good interpretability and robustness
+   - Handles overfitting well
+   - Provides feature importance scores
+   - Works well with mixed data types
+
+3. Gradient Boosted Trees (PySpark only):
+   - Distributed training capability
+   - High accuracy for large datasets
+   - Built-in regularization
+   - Scalable to big data
+
+Training Pipeline Features:
+- Automatic data loading from preprocessing pipeline
+- Model training with optimized hyperparameters
+- Comprehensive evaluation with multiple metrics
+- Feature importance analysis
+- Model persistence for deployment
+- Experiment tracking with MLflow
+- Performance monitoring and logging
+
+Usage:
+    >>> # Train with PySpark for distributed processing
+    >>> result = training_pipeline(use_pyspark=True)
+    >>> 
+    >>> # Train with custom parameters
+    >>> custom_params = {
+    ...     'n_estimators': 200,
+    ...     'max_depth': 8,
+    ...     'learning_rate': 0.1
+    ... }
+    >>> result = training_pipeline(model_params=custom_params)
+    >>> 
+    >>> # Use scikit-learn for local training
+    >>> result = training_pipeline(use_pyspark=False)
+
+Author: Data Science Team
+Version: 2.0.0
+Last Updated: 2024
+"""
+
 import json
 import os
 import sys
-import mlflow
-import pandas as pd
 import pickle
-from data_pipeline import data_pipeline
-from training_pipeline_pyspark import training_pipeline_pyspark
-from typing import Dict, Any, Tuple, Optional
+import pandas as pd
+import mlflow
+from typing import Dict, Any, Optional
+
+# Add project paths
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
+
+# Import pipeline implementations
+from data_pipeline import data_pipeline
+from training_pipeline_pyspark import training_pipeline_pyspark
+
+# Import pandas implementation components (for fallback)
 from model_building import RandomForestModelBuilder, XGBoostModelBuilder
 from model_training import ModelTrainer
 from model_evaluation import ModelEvaluator
@@ -29,18 +98,84 @@ def training_pipeline(
                         use_pyspark: bool = True
                     ) -> Dict[str, Any]:
     """
-    Execute training pipeline with option to use PySpark or pandas implementation.
+    Execute the complete machine learning training pipeline for Telco Customer Churn prediction.
+    
+    This function provides a unified interface for both PySpark ML and traditional scikit-learn
+    implementations, supporting multiple algorithms and comprehensive model evaluation.
+    
+    Training Pipeline Steps:
+    1. Data Pipeline - Execute preprocessing pipeline to prepare training data
+    2. Model Training - Train XGBoost classifier with optimal parameters
+    3. Model Evaluation - Assess performance with accuracy, precision, recall, F1-score
+    4. Model Persistence - Save trained model for deployment
+    5. MLflow Logging - Track experiments, parameters, and model artifacts
     
     Args:
-        data_path (str): Path to the raw data file
-        model_params (Optional[Dict[str, Any]]): Model hyperparameters
-        test_size (float): Proportion of data for testing
-        random_state (int): Random seed for reproducibility
-        model_path (str): Path to save the trained model
-        use_pyspark (bool): Whether to use PySpark implementation (default: True)
-        
+        data_path (str, optional): Path to the raw dataset CSV file.
+                                 Defaults to 'data/raw/TelcoCustomerChurnPrediction.csv'.
+        model_params (Optional[Dict[str, Any]], optional): Custom hyperparameters for the model.
+                                                          If None, uses optimized default parameters.
+                                                          Defaults to None.
+        test_size (float, optional): Proportion of dataset reserved for testing (0.0 to 1.0).
+                                    Defaults to 0.2 (20% for testing).
+        random_state (int, optional): Random seed for reproducible results across runs.
+                                    Defaults to 42.
+        model_path (str, optional): File path where the trained model will be saved.
+                                  Defaults to 'artifacts/models/telco_customer_churn_prediction.joblib'.
+        use_pyspark (bool, optional): Whether to use PySpark ML for distributed training.
+                                    If True, uses PySpark ML algorithms for scalability.
+                                    If False, uses scikit-learn for local training.
+                                    Defaults to True.
+    
     Returns:
-        Dict[str, Any]: Training results including models and metrics
+        Dict[str, Any]: Comprehensive training results containing:
+            - 'model': Trained XGBoost classifier object
+            - 'accuracy': Model accuracy score on test set
+            - 'classification_report': Detailed precision, recall, F1 scores per class
+            - 'confusion_matrix': Confusion matrix for error analysis
+            - 'feature_importance': Feature importance scores from the model
+            - 'training_time': Total time taken for training process
+            - 'model_path': Path where the model artifact is saved
+            - 'data_shapes': Training and testing data dimensions
+    
+    Raises:
+        Exception: If training pipeline execution fails at any step
+        FileNotFoundError: If the specified data_path file does not exist
+        ValueError: If test_size is not between 0.0 and 1.0
+        ImportError: If required ML libraries (XGBoost, PySpark) are not available
+        MLflowException: If MLflow logging fails
+    
+    Example:
+        >>> # Use PySpark for distributed training (recommended)
+        >>> result = training_pipeline(use_pyspark=True)
+        >>> model = result['model']
+        >>> accuracy = result['accuracy']
+        >>> print(f"Model accuracy: {accuracy:.3f}")
+        
+        >>> # Train with custom hyperparameters
+        >>> custom_params = {
+        ...     'n_estimators': 200,
+        ...     'max_depth': 8,
+        ...     'learning_rate': 0.1
+        ... }
+        >>> result = training_pipeline(model_params=custom_params)
+        
+        >>> # Use traditional scikit-learn for smaller datasets
+        >>> result = training_pipeline(use_pyspark=False)
+        
+        >>> # Custom data split and model save location
+        >>> result = training_pipeline(
+        ...     test_size=0.3,
+        ...     model_path='models/custom_model.joblib'
+        ... )
+    
+    Note:
+        - PySpark implementation provides better scalability for large datasets
+        - XGBoost is used as the primary algorithm due to superior performance
+        - All training experiments are automatically logged to MLflow
+        - Model artifacts include both the trained model and preprocessing encoders
+        - The function automatically handles data preprocessing if needed
+        - Training results are cached for subsequent pipeline runs
     """
     
     if use_pyspark:

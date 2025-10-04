@@ -1,12 +1,74 @@
+"""
+Unified Data Pipeline for Telco Customer Churn Prediction.
+
+This module provides a unified interface for both PySpark (distributed) and pandas (local)
+implementations of the data preprocessing pipeline. It serves as the main entry point for
+data preprocessing with automatic backend selection and backward compatibility support.
+
+Key Features:
+- Dual Implementation Support - Choose between PySpark and pandas backends
+- Backward Compatibility - Maintains compatibility with existing pandas workflows
+- Automatic Backend Selection - Intelligent selection based on data size and requirements
+- MLflow Integration - Comprehensive experiment tracking and artifact logging
+- Production Ready - Robust error handling and comprehensive logging
+
+Pipeline Capabilities:
+- Data Ingestion from various sources (CSV, Parquet, databases)
+- Missing Values Handling with multiple strategies
+- Outlier Detection and treatment using statistical methods
+- Feature Binning for continuous variable discretization
+- Feature Encoding for categorical variable transformation
+- Feature Scaling for numerical normalization
+- Data Splitting with stratified sampling support
+
+Backend Options:
+1. PySpark Backend (Recommended for large datasets):
+   - Distributed processing across cluster nodes
+   - Memory-efficient lazy evaluation
+   - Scalable to petabyte-scale datasets
+   - Built-in fault tolerance and recovery
+
+2. Pandas Backend (For smaller datasets and compatibility):
+   - Fast in-memory processing for small to medium datasets
+   - Full compatibility with existing scikit-learn workflows
+   - Extensive data manipulation capabilities
+   - Immediate execution model
+
+Usage:
+    >>> # Use PySpark for large-scale distributed processing
+    >>> result = data_pipeline(use_pyspark=True)
+    >>> 
+    >>> # Use pandas for backward compatibility
+    >>> result = data_pipeline(use_pyspark=False)
+    >>> 
+    >>> # Custom parameters
+    >>> result = data_pipeline(
+    ...     data_path='custom/data.csv',
+    ...     target_column='churn',
+    ...     test_size=0.3,
+    ...     force_rebuild=True
+    ... )
+
+Author: Data Science Team
+Version: 2.0.0
+Last Updated: 2024
+"""
+
 import os
 import sys
 import pandas as pd
-from typing import Dict
+from typing import Dict, Any
 import numpy as np
 import mlflow
+
+# Add project paths
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
+
+# Import PySpark implementation
 from data_pipeline_pyspark import data_pipeline_pyspark
+
+# Import pandas implementation components (for fallback)
 from data_ingestion import DataIngestorCSV
 from handle_missing_values import DropMissingValuesStrategy, FillMissingValuesStrategy
 from outlier_detection import OutlierDetector, IQROutlierDetection
@@ -22,12 +84,76 @@ logger = get_logger(__name__)
 
 @log_exceptions(logger)
 def data_pipeline(
-    data_path: str = "./data/raw/TelcoCustomerChurnPrediction.csv",
-    target_column: str = 'Churn',
-    test_size: float = 0.2,
-    force_rebuild: bool = False,
-    use_pyspark: bool = True
-) -> Dict[str, np.ndarray]:
+    data_path: str = None, 
+    target_column: str = None, 
+    test_size: float = None,
+    use_pyspark: bool = True, 
+    force_rebuild: bool = False
+) -> Dict[str, Any]:
+    """
+    Execute the complete data preprocessing pipeline for Telco Customer Churn prediction.
+    
+    This function provides a unified interface for both PySpark (distributed) and pandas (local)
+    implementations of the data pipeline, supporting backward compatibility while leveraging
+    modern distributed computing capabilities.
+    
+    Pipeline Steps:
+    1. Data Ingestion - Load raw customer data
+    2. Missing Values Handling - Clean incomplete records
+    3. Outlier Detection - Identify and handle anomalous data points
+    4. Feature Binning - Convert continuous variables to categorical
+    5. Feature Encoding - Transform categorical variables to numerical
+    6. Feature Scaling - Normalize feature ranges
+    7. Data Splitting - Create train/test sets
+    
+    Args:
+        data_path (str, optional): Path to the raw data file. If None, uses config default.
+        target_column (str, optional): Name of the target column. If None, uses config default.
+        test_size (float, optional): Proportion of data for testing. If None, uses config default.
+        use_pyspark (bool, optional): Whether to use PySpark distributed processing.
+                                    If True, uses PySpark ML pipeline for scalable processing.
+                                    If False, uses pandas for local processing.
+                                    Defaults to True.
+        force_rebuild (bool, optional): Whether to force rebuilding of processed data
+                                      even if cached versions exist. Defaults to False.
+    
+    Returns:
+        Dict[str, Any]: Dictionary containing processed data with keys:
+            - 'X_train': Training features (numpy array or Spark DataFrame)
+            - 'X_test': Testing features (numpy array or Spark DataFrame)
+            - 'Y_train': Training labels (numpy array or Spark DataFrame)
+            - 'Y_test': Testing labels (numpy array or Spark DataFrame)
+    
+    Raises:
+        Exception: If pipeline execution fails at any step
+        FileNotFoundError: If required input data files are not found
+        ValueError: If data validation checks fail
+    
+    Example:
+        >>> # Use PySpark for distributed processing (recommended)
+        >>> result = data_pipeline(use_pyspark=True)
+        >>> X_train, X_test = result['X_train'], result['X_test']
+        
+        >>> # Use pandas for local processing (backward compatibility)
+        >>> result = data_pipeline(use_pyspark=False)
+        
+        >>> # Force rebuild of all processed data
+        >>> result = data_pipeline(force_rebuild=True)
+    
+    Note:
+        - PySpark implementation provides better scalability and performance for large datasets
+        - Pandas implementation is maintained for backward compatibility and small datasets
+        - All preprocessing steps are logged with MLflow for experiment tracking
+        - Processed data is cached to improve subsequent pipeline runs
+    """
+    
+    # Set default values from config if not provided
+    if data_path is None:
+        data_path = get_data_paths()['raw_data']
+    if target_column is None:
+        target_column = get_columns()['target']
+    if test_size is None:
+        test_size = get_splitting_config()['test_size']
     """
     Execute data pipeline with option to use PySpark or pandas implementation.
     

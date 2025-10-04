@@ -1,6 +1,49 @@
 """
 PySpark Data Pipeline for Telco Customer Churn Prediction.
-Handles the complete data preprocessing pipeline using PySpark operations.
+
+This module implements a complete data preprocessing pipeline using Apache Spark for
+distributed processing of large-scale customer churn datasets. It provides scalable
+data transformation capabilities with built-in error handling and MLflow integration.
+
+Key Features:
+- Distributed data processing using PySpark DataFrames
+- Comprehensive preprocessing pipeline (9 steps)
+- MLflow experiment tracking and artifact logging
+- Automatic schema validation and data quality checks
+- Memory-efficient processing with lazy evaluation
+- Production-ready error handling and logging
+
+Pipeline Steps:
+1. Data Ingestion - Load raw CSV data into Spark DataFrame
+2. Missing Values Handling - Handle null values and data quality issues
+3. Outlier Detection - Identify and process anomalous data points
+4. Feature Binning - Convert continuous variables to categorical bins
+5. Feature Encoding - Transform categorical variables to numerical format
+6. Feature Scaling - Normalize numerical features for ML algorithms
+7. Data Type Optimization - Convert data types for memory efficiency
+8. Data Validation - Ensure data quality and schema compliance
+9. Data Splitting - Create train/test sets with stratified sampling
+
+Dependencies:
+- Apache Spark 3.x
+- PySpark SQL and ML libraries
+- MLflow for experiment tracking
+- Custom preprocessing modules
+
+Usage:
+    >>> from data_pipeline_pyspark import data_pipeline_pyspark
+    >>> result = data_pipeline_pyspark(
+    ...     data_path='data/raw/TelcoCustomerChurnPrediction.csv',
+    ...     target_column='Churn',
+    ...     test_size=0.2,
+    ...     force_rebuild=False
+    ... )
+    >>> train_df = result['train_df']
+    >>> test_df = result['test_df']
+
+Author: Data Science Team
+Version: 2.0.0
+Last Updated: 2024
 """
 
 import os

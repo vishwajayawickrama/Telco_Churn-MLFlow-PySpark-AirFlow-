@@ -1,6 +1,54 @@
 """
 PySpark Training Pipeline for Telco Customer Churn Prediction.
-Handles the complete model training pipeline using PySpark ML operations.
+
+This module implements a complete machine learning training pipeline using Apache Spark MLlib
+for distributed model training and evaluation. It supports multiple algorithms with automatic
+hyperparameter tuning and comprehensive performance evaluation.
+
+Key Features:
+- Distributed model training using PySpark MLlib
+- Multiple ML algorithms (GBT, RandomForest, LogisticRegression, DecisionTree)
+- Automatic hyperparameter tuning with cross-validation
+- Comprehensive model evaluation and metrics
+- MLflow integration for experiment tracking
+- Scalable processing for large datasets
+- Production-ready model persistence
+
+Supported Algorithms:
+- Gradient Boosted Trees (GBT) - Default, best performance
+- Random Forest - Good for interpretability
+- Logistic Regression - Fast, baseline model
+- Decision Tree - Simple, interpretable
+
+Training Pipeline Steps:
+1. Data Loading - Load preprocessed data from data pipeline
+2. Feature Preparation - Prepare features for ML algorithms
+3. Model Training - Train selected algorithm with optimal parameters
+4. Hyperparameter Tuning - Optimize model parameters (optional)
+5. Model Evaluation - Assess performance with multiple metrics
+6. Feature Importance - Extract feature importance scores
+7. Model Persistence - Save trained model pipeline
+8. MLflow Logging - Track experiments and model artifacts
+
+Dependencies:
+- Apache Spark 3.x with MLlib
+- PySpark SQL and ML libraries
+- MLflow for experiment tracking
+- Custom data pipeline modules
+
+Usage:
+    >>> from training_pipeline_pyspark import training_pipeline_pyspark
+    >>> result = training_pipeline_pyspark(
+    ...     algorithm='gbt',
+    ...     hyperparameter_tuning=True,
+    ...     cross_validation_folds=3
+    ... )
+    >>> model = result['model']
+    >>> metrics = result['metrics']
+
+Author: Data Science Team
+Version: 2.0.0
+Last Updated: 2024
 """
 
 import json

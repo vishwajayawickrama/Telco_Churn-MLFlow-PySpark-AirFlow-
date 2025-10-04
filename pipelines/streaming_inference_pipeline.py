@@ -1,15 +1,88 @@
+"""
+Unified Streaming Inference Pipeline for Telco Customer Churn Prediction.
+
+This module provides a unified interface for both PySpark Structured Streaming and traditional
+batch inference implementations. It supports real-time customer churn predictions with automatic
+preprocessing and comprehensive monitoring capabilities.
+
+Key Features:
+- Dual Implementation Support - Choose between PySpark Streaming and pandas batch
+- Real-time Predictions - Process individual customer records instantly
+- Batch Processing - Efficient processing of multiple customer records
+- Automatic Preprocessing - Applies same transformations as training pipeline
+- MLflow Integration - Prediction tracking and model monitoring
+- Production Ready - Robust error handling and performance monitoring
+
+Inference Modes:
+1. PySpark Streaming (Recommended for production):
+   - Real-time streaming inference
+   - High-throughput batch processing
+   - Automatic scaling and fault tolerance
+   - Structured streaming capabilities
+   - Integration with Kafka, Kinesis, etc.
+
+2. Pandas Batch Processing (For development and small-scale deployment):
+   - Fast single-record predictions
+   - Simple integration with web APIs
+   - Direct model loading and inference
+   - Memory-efficient for small batches
+
+Prediction Capabilities:
+- Single Customer Prediction - Individual churn probability scores
+- Batch Customer Prediction - Process multiple customers efficiently
+- Stream Processing - Continuous real-time data processing
+- API Integration - REST API compatible prediction interface
+- Monitoring - Track prediction metrics and model performance
+
+Input Data Support:
+- JSON format for single customer records
+- CSV files for batch processing
+- Streaming data from message queues
+- Database query results
+- Real-time API requests
+
+Usage:
+    >>> # Real-time single customer prediction
+    >>> customer_data = {
+    ...     'gender': 'Female',
+    ...     'SeniorCitizen': 0,
+    ...     'Partner': 'Yes',
+    ...     'tenure': 12,
+    ...     'MonthlyCharges': 65.0
+    ... }
+    >>> result = streaming_inference(
+    ...     use_pyspark=True,
+    ...     input_data=customer_data
+    ... )
+    >>> 
+    >>> # Batch processing with pandas
+    >>> result = streaming_inference(
+    ...     use_pyspark=False,
+    ...     inference=model_instance,
+    ...     data=customer_dataframe
+    ... )
+
+Author: Data Science Team
+Version: 2.0.0
+Last Updated: 2024
+"""
+
 import os
 import sys
+import time
+import mlflow
 import pandas as pd
+from typing import Dict, Any, Optional
+
+# Add project paths
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
-from mlflow_utils import MLflowTracker, create_mlflow_run_tags
-from model_inference import ModelInference
+
+# Import pipeline implementations
 from streaming_inference_pipeline_pyspark import streaming_inference_pyspark
+from model_inference import ModelInference
 from logger import get_logger, ProjectLogger, log_exceptions
-import mlflow
-import time
-from typing import Dict, Any, Optional
+from mlflow_utils import MLflowTracker, create_mlflow_run_tags
 
 # Initialize logger
 logger = get_logger(__name__)
@@ -43,18 +116,96 @@ def streaming_inference(
     batch_data_path: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Perform streaming inference with option to use PySpark or pandas implementation.
+    Execute real-time streaming inference for Telco Customer Churn prediction.
+    
+    This function provides a unified interface for both PySpark Structured Streaming and
+    traditional batch inference, supporting real-time predictions on customer data streams.
+    
+    Streaming Inference Pipeline:
+    1. Model Loading - Load trained model for inference
+    2. Data Validation - Validate input data format and schema
+    3. Preprocessing - Apply same transformations as training pipeline
+    4. Prediction - Generate churn probability and classification
+    5. MLflow Logging - Track inference metrics and predictions
+    6. Result Formatting - Return structured prediction results
     
     Args:
-        inference: ModelInference instance (for pandas implementation)
-        data: Data for inference (for pandas implementation)
-        use_pyspark (bool): Whether to use PySpark implementation
-        model_path (str): Path to model for PySpark implementation
-        input_data (Dict): Single customer data for PySpark prediction
-        batch_data_path (str): Path to batch data for PySpark prediction
-        
+        inference (ModelInference, optional): Pre-initialized model inference instance
+                                           for pandas implementation. Used when use_pyspark=False.
+        data (Dict/DataFrame, optional): Input customer data for pandas prediction.
+                                       Required when use_pyspark=False.
+        use_pyspark (bool, optional): Whether to use PySpark Structured Streaming.
+                                    If True, uses PySpark for scalable real-time inference.
+                                    If False, uses pandas for single-record inference.
+                                    Defaults to True.
+        model_path (str, optional): Path to the saved PySpark ML pipeline model.
+                                  Required when use_pyspark=True.
+                                  Defaults to "./artifacts/models/pyspark_pipeline_model".
+        input_data (Dict[str, Any], optional): Single customer record for PySpark prediction.
+                                             Used for real-time single-record inference.
+                                             Requires customer feature values.
+        batch_data_path (str, optional): Path to batch data file for PySpark processing.
+                                        Used for batch inference on multiple records.
+                                        Alternative to input_data for batch processing.
+    
     Returns:
-        Dict[str, Any]: Inference results
+        Dict[str, Any]: Comprehensive inference results containing:
+            - 'prediction': Churn prediction (0=No Churn, 1=Churn)
+            - 'probability': Churn probability score (0.0 to 1.0)
+            - 'confidence': Model confidence level
+            - 'customer_id': Customer identifier (if provided)
+            - 'features': Processed feature values used for prediction
+            - 'inference_time': Time taken for prediction
+            - 'model_version': Version of the model used
+            - 'preprocessing_applied': List of preprocessing steps applied
+    
+    Raises:
+        Exception: If inference pipeline execution fails
+        FileNotFoundError: If model_path does not exist
+        ValueError: If input data format is invalid or missing required features
+        ImportError: If required libraries (PySpark, MLlib) are not available
+        MLflowException: If MLflow logging fails
+    
+    Example:
+        >>> # Real-time single customer prediction with PySpark
+        >>> customer_data = {
+        ...     'gender': 'Female',
+        ...     'SeniorCitizen': 0,
+        ...     'Partner': 'Yes',
+        ...     'Dependents': 'No',
+        ...     'tenure': 12,
+        ...     'PhoneService': 'Yes',
+        ...     'MonthlyCharges': 65.0,
+        ...     'TotalCharges': 780.0
+        ... }
+        >>> result = streaming_inference(
+        ...     use_pyspark=True,
+        ...     input_data=customer_data
+        ... )
+        >>> print(f"Churn probability: {result['probability']:.3f}")
+        
+        >>> # Batch processing with PySpark
+        >>> result = streaming_inference(
+        ...     use_pyspark=True,
+        ...     batch_data_path='data/new_customers.csv'
+        ... )
+        
+        >>> # Traditional pandas inference for backward compatibility
+        >>> from model_inference import ModelInference
+        >>> inference = ModelInference('artifacts/models/model.joblib')
+        >>> result = streaming_inference(
+        ...     use_pyspark=False,
+        ...     inference=inference,
+        ...     data=customer_data
+        ... )
+    
+    Note:
+        - PySpark implementation supports both real-time streaming and batch inference
+        - Real-time predictions are ideal for web applications and APIs
+        - Batch processing is efficient for large datasets
+        - All inference results are logged to MLflow for monitoring
+        - Model preprocessing is automatically applied to maintain consistency
+        - Supports both single predictions and batch predictions
     """
     
     if use_pyspark:
