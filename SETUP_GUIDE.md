@@ -317,8 +317,7 @@ Telco_Customer_Churn(MLFlow, PySpark, Airflow integrated)/
 ├── dags/
 │   ├── telco_churn_ml_pipeline_dag.py    # Main ML workflow
 │   ├── telco_churn_hyperparameter_tuning_dag.py  # Optimization
-│   ├── telco_churn_model_monitoring_dag.py       # Monitoring
-│   └── airflow_utils.py                  # Utility functions
+│   └── telco_churn_model_monitoring_dag.py       # Monitoring
 ├── 
 ├── src/
 │   ├── data_ingestion.py                 # Data loading
@@ -333,7 +332,8 @@ Telco_Customer_Churn(MLFlow, PySpark, Airflow integrated)/
 └── 
 └── utils/
     ├── config.py                         # Configuration management
-    └── logger.py                         # Logging utilities
+    ├── logger.py                         # Logging utilities
+    └── airflow_utils.py                  # Airflow utility functions
 ```
 
 ## 🚨 Troubleshooting
