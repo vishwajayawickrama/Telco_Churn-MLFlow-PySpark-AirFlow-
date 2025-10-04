@@ -24,12 +24,16 @@ import logging
 import json
 import pandas as pd
 import numpy as np
+import glob
 from typing import Dict, Any, List
 
 # Add project paths
-sys.path.append('/opt/airflow/dags/pipelines')
-sys.path.append('/opt/airflow/dags/src')
-sys.path.append('/opt/airflow/dags/utils')
+import os
+# Get the parent directory of dags folder (project root)
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.join(project_root, 'pipelines'))
+sys.path.append(os.path.join(project_root, 'src'))
+sys.path.append(os.path.join(project_root, 'utils'))
 
 from airflow_utils import AirflowMLPipelineUtils, get_default_config
 
@@ -78,9 +82,9 @@ CONFIG.update({
         'baseline_window_days': 30
     },
     'data_sources': {
-        'production_predictions': '/opt/airflow/data/predictions',
-        'ground_truth': '/opt/airflow/data/ground_truth',
-        'reference_data': '/opt/airflow/data/reference'
+        'production_predictions': os.path.join(project_root, 'data', 'predictions'),
+        'ground_truth': os.path.join(project_root, 'data', 'ground_truth'),
+        'reference_data': os.path.join(project_root, 'data', 'reference')
     }
 })
 
@@ -405,7 +409,7 @@ def generate_monitoring_report(**context):
             })
         
         # Save monitoring report
-        report_file = f"/opt/airflow/reports/monitoring_report_{context['ds']}.json"
+        report_file = os.path.join(project_root, 'reports', f'monitoring_report_{context["ds"]}.json')
         os.makedirs(os.path.dirname(report_file), exist_ok=True)
         
         with open(report_file, 'w') as f:

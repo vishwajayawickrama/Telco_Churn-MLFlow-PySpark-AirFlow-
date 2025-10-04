@@ -12,10 +12,15 @@ all: help
 help:
 	@echo "Available targets:"
 	@echo "  make install             - Install project dependencies and set up environment"
+	@echo "  make setup-local-airflow - Set up local Airflow environment"
+	@echo "  make airflow-start       - Start Airflow webserver and scheduler"
+	@echo "  make airflow-stop        - Stop Airflow services"
 	@echo "  make data-pipeline       - Run the data pipeline"
 	@echo "  make train-pipeline      - Run the training pipeline"
 	@echo "  make streaming-inference - Run the streaming inference pipeline with the sample JSON"
 	@echo "  make run-all             - Run all pipelines in sequence"
+	@echo "  make mlflow-ui           - Start MLflow UI"
+	@echo "  make start-pipeline      - Start complete ML pipeline (Airflow + MLflow)"
 	@echo "  make clean               - Clean up artifacts"
 
 # Install project dependencies and set up environment
@@ -26,8 +31,50 @@ install:
 	@echo "Activating virtual environment and installing dependencies..."
 	@source .venv/bin/activate && pip install --upgrade pip
 	@source .venv/bin/activate && pip install -r requirements.txt
+	@source .venv/bin/activate && pip install apache-airflow==2.7.0
 	@echo "Installation completed successfully!"
 	@echo "To activate the virtual environment, run: source .venv/bin/activate"
+
+# Set up local Airflow environment
+setup-local-airflow:
+	@echo "Setting up local Airflow environment..."
+	@source $(VENV) && export AIRFLOW_HOME=~/airflow && airflow db init
+	@source $(VENV) && export AIRFLOW_HOME=~/airflow && airflow users create \
+		--username admin \
+		--firstname Admin \
+		--lastname User \
+		--role Admin \
+		--email admin@example.com \
+		--password admin
+	@echo "Copying DAGs to Airflow directory..."
+	@mkdir -p ~/airflow/dags
+	@cp -r dags/* ~/airflow/dags/
+	@echo "Airflow setup completed!"
+
+# Start Airflow services
+airflow-start:
+	@echo "Starting Airflow webserver and scheduler..."
+	@source $(VENV) && export AIRFLOW_HOME=~/airflow && airflow webserver --port 8080 --daemon
+	@source $(VENV) && export AIRFLOW_HOME=~/airflow && airflow scheduler --daemon
+	@echo "Airflow services started!"
+	@echo "Access Airflow UI at: http://localhost:8080 (admin/admin)"
+
+# Stop Airflow services
+airflow-stop:
+	@echo "Stopping Airflow services..."
+	@-pkill -f "airflow webserver"
+	@-pkill -f "airflow scheduler"
+	@echo "Airflow services stopped!"
+
+# Start complete ML pipeline
+start-pipeline:
+	@echo "Starting complete ML pipeline..."
+	@make airflow-start
+	@sleep 5
+	@make mlflow-ui &
+	@echo "ML Pipeline started!"
+	@echo "Airflow UI: http://localhost:8080"
+	@echo "MLflow UI: http://localhost:$(MLFLOW_PORT)"
 
 # Clean up
 clean:

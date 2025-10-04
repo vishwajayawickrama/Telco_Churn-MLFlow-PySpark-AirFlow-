@@ -29,9 +29,12 @@ import json
 from typing import Dict, Any, List
 
 # Add project paths
-sys.path.append('/opt/airflow/dags/pipelines')
-sys.path.append('/opt/airflow/dags/src')
-sys.path.append('/opt/airflow/dags/utils')
+import os
+# Get the parent directory of dags folder (project root)
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.join(project_root, 'pipelines'))
+sys.path.append(os.path.join(project_root, 'src'))
+sys.path.append(os.path.join(project_root, 'utils'))
 
 # DAG Configuration
 DEFAULT_ARGS = {
@@ -60,9 +63,9 @@ dag = DAG(
 
 # Configuration
 CONFIG = {
-    'data_path': '/opt/airflow/data/raw/TelcoCustomerChurnPrediction.csv',
-    'model_path': '/opt/airflow/artifacts/models/telco_churn_model',
-    'results_path': '/opt/airflow/artifacts/results',
+    'data_path': os.path.join(project_root, 'data', 'raw', 'TelcoCustomerChurnPrediction.csv'),
+    'model_path': os.path.join(project_root, 'artifacts', 'models', 'telco_churn_model'),
+    'results_path': os.path.join(project_root, 'artifacts', 'results'),
     'target_column': 'Churn',
     'test_size': 0.2,
     'algorithms': ['gbt', 'randomforest', 'logisticregression'],
