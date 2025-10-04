@@ -1,89 +1,197 @@
+"""
+Model training module for PySpark ML Pipeline operations.
+Provides comprehensive training functionality with logging and validation.
+"""
+
 import os
-import sys
-import pickle
-import joblib
-import pandas as pd
-import numpy as np
-from typing import Tuple, Any, Optional, Dict
+import logging
+from typing import Tuple, Any, Optional, Dict, List, Union
 from datetime import datetime
-from sklearn.base import BaseEstimator
-from sklearn.model_selection import cross_val_score, validation_curve
+from pyspark.sql import DataFrame, SparkSession
+from pyspark.ml import Pipeline, PipelineModel
+from pyspark.ml.feature import VectorAssembler, StringIndexer
+from pyspark.ml.evaluation import BinaryClassificationEvaluator, MulticlassClassificationEvaluator
+from pyspark.ml.tuning import CrossValidator, ParamGridBuilder
+from pyspark.ml.classification import (
+    GBTClassifier, RandomForestClassifier, 
+    LogisticRegression, DecisionTreeClassifier
+)
 
-# Add utils to path for logger import
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
-from logger import get_logger, ProjectLogger, log_exceptions
+from utils.logger import ProjectLogger, log_exceptions
+from utils.spark_utils import get_spark_session
 
-# Initialize logger
-logger = get_logger(__name__)
+# Configure logger
+logger = logging.getLogger(__name__)
 
 
 class ModelTrainer:
     """
-    Comprehensive model training class with logging and validation.
+    Comprehensive model training class for PySpark ML with logging and validation.
     """
     
-    def __init__(self):
-        """Initialize model trainer."""
-        ProjectLogger.log_section_header(logger, "INITIALIZING MODEL TRAINER")
-        logger.info("Model trainer ready for training operations")
+    def __init__(self, spark: Optional[SparkSession] = None):
+        """
+        Initialize model trainer.
+        
+        Args:
+            spark: Optional SparkSession
+        """
+        self.spark = spark or get_spark_session()
+        ProjectLogger.log_section_header(logger, "INITIALIZING PYSPARK MODEL TRAINER")
+        logger.info("PySpark model trainer ready for training operations")
 
     @log_exceptions(logger)
     def train(
         self, 
         model,
-        X_train,
-        Y_train,
-    ):
+        train_df: DataFrame,
+        feature_columns: List[str],
+        target_column: str,
+        model_save_path: Optional[str] = None
+    ) -> Tuple[PipelineModel, Dict[str, float]]:
         """
-        Train a model with simple training approach.
+        Train a PySpark ML model with pipeline approach.
         
         Args:
-            model: Scikit-learn compatible model
-            X_train (pd.DataFrame): Training features
-            y_train (pd.Series): Training targets
-            validation_split (float): Fraction of training data to use for validation
+            model: PySpark ML classifier
+            train_df (DataFrame): Training DataFrame
+            feature_columns (List[str]): List of feature column names
+            target_column (str): Name of the target column
+            model_save_path (Optional[str]): Path to save the trained model
             
         Returns:
-            Tuple: (trained_model, train_score)
+            Tuple: (trained_pipeline_model, metrics)
         """
-        ProjectLogger.log_step_header(logger, "STEP", "TRAINING MODEL WITH SIMPLE APPROACH")
+        ProjectLogger.log_step_header(logger, "STEP", "TRAINING MODEL WITH PYSPARK ML PIPELINE")
         
         try:
             # Validate inputs
-            if X_train.empty:
-                raise ValueError("Training features (X_train) is empty")
+            if train_df.count() == 0:
+                raise ValueError("Training DataFrame is empty")
             
-            if Y_train.empty:
-                raise ValueError("Training targets (Y_train) is empty")
+            if not feature_columns:
+                raise ValueError("Feature columns list is empty")
             
-            if len(X_train) != len(Y_train):
-                raise ValueError(f"Feature and target lengths don't match: {len(X_train)} vs {len(Y_train)}")
+            if target_column not in train_df.columns:
+                raise ValueError(f"Target column '{target_column}' not found in DataFrame")
             
-            logger.info(f"Training data shape: {X_train.shape}")
-            logger.info(f"Target data shape: {Y_train.shape}")
+            # Validate feature columns exist
+            missing_features = [col for col in feature_columns if col not in train_df.columns]
+            if missing_features:
+                raise ValueError(f"Missing feature columns: {missing_features}")
+            
+            train_count = train_df.count()
+            logger.info(f"Training data size: {train_count} samples")
+            logger.info(f"Feature columns: {len(feature_columns)} features")
+            logger.info(f"Target column: {target_column}")
             logger.info(f"Model type: {type(model).__name__}")
             
+            # Check target distribution
+            logger.info("Target distribution in training data:")
+            target_dist = train_df.groupBy(target_column).count().collect()
+            for row in target_dist:
+                value = row[target_column]
+                count = row['count']
+                percentage = (count / train_count) * 100
+                logger.info(f"  - {value}: {count} samples ({percentage:.2f}%)")
+            
+            # Build ML Pipeline
+            logger.info("Building ML Pipeline...")
+            
+            # Vector assembler to combine features
+            vector_assembler = VectorAssembler(
+                inputCols=feature_columns,
+                outputCol="features",
+                handleInvalid="keep"
+            )
+            
+            # String indexer for target if needed (convert string labels to numeric)
+            target_indexer = StringIndexer(
+                inputCol=target_column,
+                outputCol="label",
+                handleInvalid="keep"
+            )
+            
+            # Set up model with proper input/output columns
+            model.setFeaturesCol("features")
+            model.setLabelCol("label")
+            model.setPredictionCol("prediction")
+            
+            # Create pipeline
+            pipeline_stages = [vector_assembler, target_indexer, model]
+            pipeline = Pipeline(stages=pipeline_stages)
+            
+            logger.info(f"Pipeline stages: {len(pipeline_stages)}")
+            logger.info("  1. VectorAssembler - Combine features")
+            logger.info("  2. StringIndexer - Convert target to numeric labels")
+            logger.info(f"  3. {type(model).__name__} - Classification model")
             
             # Start training
             training_start = datetime.now()
             logger.info(f"Starting model training at: {training_start}")
             
-            # Fit the model
-            logger.info("Fitting model to training data...")
-            model.fit(X_train, Y_train)
+            # Fit the pipeline
+            logger.info("Fitting ML Pipeline to training data...")
+            pipeline_model = pipeline.fit(train_df)
             
             training_end = datetime.now()
             training_duration = (training_end - training_start).total_seconds()
             
             logger.info(f"Training completed in {training_duration:.2f} seconds")
             
-            # Calculate training score
-            logger.info("Calculating training score...")
-            train_score = model.score(X_train, Y_train)
+            # Make predictions on training data for evaluation
+            logger.info("Making predictions on training data for evaluation...")
+            train_predictions = pipeline_model.transform(train_df)
             
-            ProjectLogger.log_success_header(logger, "MODEL TRAINING COMPLETED")
+            # Calculate training metrics
+            logger.info("Calculating training metrics...")
             
-            return model, train_score
+            # Binary classification evaluator
+            binary_evaluator = BinaryClassificationEvaluator(
+                labelCol="label",
+                rawPredictionCol="rawPrediction",
+                metricName="areaUnderROC"
+            )
+            
+            # Multiclass evaluator
+            multiclass_evaluator = MulticlassClassificationEvaluator(
+                labelCol="label",
+                predictionCol="prediction"
+            )
+            
+            # Calculate various metrics
+            auc = binary_evaluator.evaluate(train_predictions)
+            accuracy = multiclass_evaluator.evaluate(train_predictions, {multiclass_evaluator.metricName: "accuracy"})
+            precision = multiclass_evaluator.evaluate(train_predictions, {multiclass_evaluator.metricName: "weightedPrecision"})
+            recall = multiclass_evaluator.evaluate(train_predictions, {multiclass_evaluator.metricName: "weightedRecall"})
+            f1 = multiclass_evaluator.evaluate(train_predictions, {multiclass_evaluator.metricName: "f1"})
+            
+            metrics = {
+                'auc': auc,
+                'accuracy': accuracy,
+                'precision': precision,
+                'recall': recall,
+                'f1': f1,
+                'training_duration_seconds': training_duration,
+                'training_samples': train_count
+            }
+            
+            logger.info("Training metrics:")
+            logger.info(f"  - AUC: {auc:.4f}")
+            logger.info(f"  - Accuracy: {accuracy:.4f}")
+            logger.info(f"  - Precision: {precision:.4f}")
+            logger.info(f"  - Recall: {recall:.4f}")
+            logger.info(f"  - F1 Score: {f1:.4f}")
+            
+            # Save model if path provided
+            if model_save_path:
+                logger.info(f"Saving model to: {model_save_path}")
+                self.save_model(pipeline_model, model_save_path)
+                metrics['model_save_path'] = model_save_path
+            
+            ProjectLogger.log_success_header(logger, "PYSPARK MODEL TRAINING COMPLETED")
+            
+            return pipeline_model, metrics
             
         except ValueError as e:
             ProjectLogger.log_error_header(logger, "DATA VALIDATION ERROR")
@@ -95,19 +203,171 @@ class ModelTrainer:
             logger.error(f"Unexpected error: {str(e)}")
             raise
 
-    
-
     @log_exceptions(logger)
-    def save_model(self, model: BaseEstimator, filepath: str, method: str = 'joblib') -> None:
+    def train_with_cross_validation(
+        self,
+        model,
+        train_df: DataFrame,
+        feature_columns: List[str],
+        target_column: str,
+        param_grid: Optional[Dict] = None,
+        cv_folds: int = 3,
+        metric_name: str = "areaUnderROC",
+        model_save_path: Optional[str] = None
+    ) -> Tuple[PipelineModel, Dict[str, Any]]:
         """
-        Save a trained model to file.
+        Train a model with cross-validation and hyperparameter tuning.
         
         Args:
-            model: Trained model to save
-            filepath (str): Path to save the model
-            method (str): Serialization method ('joblib' or 'pickle')
+            model: PySpark ML classifier
+            train_df (DataFrame): Training DataFrame
+            feature_columns (List[str]): List of feature column names
+            target_column (str): Name of the target column
+            param_grid (Optional[Dict]): Parameter grid for hyperparameter tuning
+            cv_folds (int): Number of cross-validation folds
+            metric_name (str): Evaluation metric name
+            model_save_path (Optional[str]): Path to save the best model
+            
+        Returns:
+            Tuple: (best_model, cv_results)
         """
-        ProjectLogger.log_step_header(logger, "STEP", "SAVING TRAINED MODEL")
+        ProjectLogger.log_step_header(logger, "STEP", "TRAINING MODEL WITH CROSS-VALIDATION")
+        
+        try:
+            logger.info(f"Cross-validation folds: {cv_folds}")
+            logger.info(f"Evaluation metric: {metric_name}")
+            
+            # Build pipeline (same as regular training)
+            vector_assembler = VectorAssembler(
+                inputCols=feature_columns,
+                outputCol="features",
+                handleInvalid="keep"
+            )
+            
+            target_indexer = StringIndexer(
+                inputCol=target_column,
+                outputCol="label",
+                handleInvalid="keep"
+            )
+            
+            model.setFeaturesCol("features")
+            model.setLabelCol("label")
+            model.setPredictionCol("prediction")
+            
+            pipeline = Pipeline(stages=[vector_assembler, target_indexer, model])
+            
+            # Set up parameter grid
+            if param_grid is None:
+                # Default parameter grid based on model type
+                param_grid = self._get_default_param_grid(model, pipeline)
+            else:
+                # Convert user param grid to ParamGridBuilder format
+                param_grid_builder = ParamGridBuilder()
+                for param_name, values in param_grid.items():
+                    # This would need to be adapted based on actual parameter structure
+                    param_grid_builder = param_grid_builder.addGrid(getattr(model, param_name), values)
+                param_grid = param_grid_builder.build()
+            
+            logger.info(f"Parameter grid size: {len(param_grid)} combinations")
+            
+            # Set up evaluator
+            if metric_name in ["areaUnderROC", "areaUnderPR"]:
+                evaluator = BinaryClassificationEvaluator(
+                    labelCol="label",
+                    rawPredictionCol="rawPrediction",
+                    metricName=metric_name
+                )
+            else:
+                evaluator = MulticlassClassificationEvaluator(
+                    labelCol="label",
+                    predictionCol="prediction",
+                    metricName=metric_name
+                )
+            
+            # Set up cross-validator
+            cv = CrossValidator(
+                estimator=pipeline,
+                estimatorParamMaps=param_grid,
+                evaluator=evaluator,
+                numFolds=cv_folds,
+                seed=42
+            )
+            
+            # Train with cross-validation
+            training_start = datetime.now()
+            logger.info("Starting cross-validation training...")
+            
+            cv_model = cv.fit(train_df)
+            
+            training_end = datetime.now()
+            training_duration = (training_end - training_start).total_seconds()
+            
+            logger.info(f"Cross-validation completed in {training_duration:.2f} seconds")
+            
+            # Get best model and results
+            best_model = cv_model.bestModel
+            best_metric = max(cv_model.avgMetrics)
+            
+            cv_results = {
+                'best_metric_value': best_metric,
+                'metric_name': metric_name,
+                'cv_folds': cv_folds,
+                'avg_metrics': cv_model.avgMetrics,
+                'training_duration_seconds': training_duration,
+                'param_grid_size': len(param_grid)
+            }
+            
+            logger.info("Cross-validation results:")
+            logger.info(f"  - Best {metric_name}: {best_metric:.4f}")
+            logger.info(f"  - Parameter combinations tested: {len(param_grid)}")
+            
+            # Save best model if path provided
+            if model_save_path:
+                logger.info(f"Saving best model to: {model_save_path}")
+                self.save_model(best_model, model_save_path)
+                cv_results['model_save_path'] = model_save_path
+            
+            ProjectLogger.log_success_header(logger, "CROSS-VALIDATION TRAINING COMPLETED")
+            
+            return best_model, cv_results
+            
+        except Exception as e:
+            ProjectLogger.log_error_header(logger, "UNEXPECTED ERROR IN CV TRAINING")
+            logger.error(f"Unexpected error: {str(e)}")
+            raise
+
+    def _get_default_param_grid(self, model, pipeline) -> List:
+        """Get default parameter grid for common models."""
+        param_grid_builder = ParamGridBuilder()
+        
+        if isinstance(model, RandomForestClassifier):
+            param_grid_builder = param_grid_builder \
+                .addGrid(model.numTrees, [10, 20, 50]) \
+                .addGrid(model.maxDepth, [5, 10, 15])
+        elif isinstance(model, GBTClassifier):
+            param_grid_builder = param_grid_builder \
+                .addGrid(model.maxIter, [10, 20, 50]) \
+                .addGrid(model.maxDepth, [5, 10])
+        elif isinstance(model, LogisticRegression):
+            param_grid_builder = param_grid_builder \
+                .addGrid(model.regParam, [0.01, 0.1, 1.0]) \
+                .addGrid(model.elasticNetParam, [0.0, 0.5, 1.0])
+        elif isinstance(model, DecisionTreeClassifier):
+            param_grid_builder = param_grid_builder \
+                .addGrid(model.maxDepth, [5, 10, 15, 20])
+        
+        return param_grid_builder.build()
+
+    @log_exceptions(logger)
+    def save_model(self, model: PipelineModel, filepath: str) -> None:
+        """
+        Save a trained PySpark ML Pipeline model to file.
+        
+        Args:
+            model (PipelineModel): Trained PySpark ML Pipeline model to save
+            filepath (str): Path to save the model
+        """
+        ProjectLogger.log_step_header(logger, "STEP", "SAVING TRAINED PYSPARK MODEL")
         
         try:
             # Validate inputs
@@ -117,33 +377,36 @@ class ModelTrainer:
             if not filepath:
                 raise ValueError("Filepath cannot be empty")
             
-            if method not in ['joblib', 'pickle']:
-                raise ValueError("Method must be 'joblib' or 'pickle'")
+            if not isinstance(model, PipelineModel):
+                raise ValueError("Model must be a PySpark ML PipelineModel")
             
             # Create directory if it doesn't exist
-            os.makedirs(os.path.dirname(filepath), exist_ok=True)
-            logger.info(f"Directory created/verified: {os.path.dirname(filepath)}")
+            os.makedirs(filepath, exist_ok=True)
+            logger.info(f"Model directory created/verified: {filepath}")
             
-            logger.info(f"Saving model using {method} method")
+            logger.info(f"Saving PySpark ML Pipeline model")
             logger.info(f"Model type: {type(model).__name__}")
             logger.info(f"Save path: {filepath}")
+            logger.info(f"Pipeline stages: {len(model.stages)}")
             
-            # Save based on method
-            if method == 'joblib':
-                joblib.dump(model, filepath)
-            else:  # pickle
-                with open(filepath, 'wb') as f:
-                    pickle.dump(model, f)
+            # Save the model
+            model.write().overwrite().save(filepath)
             
             # Verify save
             if os.path.exists(filepath):
-                file_size = os.path.getsize(filepath)
+                # Calculate directory size
+                total_size = 0
+                for dirpath, dirnames, filenames in os.walk(filepath):
+                    for f in filenames:
+                        fp = os.path.join(dirpath, f)
+                        total_size += os.path.getsize(fp)
+                
                 logger.info(f"Model saved successfully")
-                logger.info(f"File size: {file_size:,} bytes ({file_size / 1024 / 1024:.2f} MB)")
+                logger.info(f"Total size: {total_size:,} bytes ({total_size / 1024 / 1024:.2f} MB)")
             else:
-                raise Exception("Model file was not created")
+                raise Exception("Model directory was not created")
             
-            ProjectLogger.log_success_header(logger, "MODEL SAVED SUCCESSFULLY")
+            ProjectLogger.log_success_header(logger, "PYSPARK MODEL SAVED SUCCESSFULLY")
             
         except ValueError as e:
             ProjectLogger.log_error_header(logger, "MODEL SAVE VALIDATION ERROR")
@@ -156,52 +419,41 @@ class ModelTrainer:
             raise
 
     @log_exceptions(logger)
-    def load_model(self, filepath: str, method: str = 'auto') -> BaseEstimator:
+    def load_model(self, filepath: str) -> PipelineModel:
         """
-        Load a trained model from file.
+        Load a trained PySpark ML Pipeline model from file.
         
         Args:
             filepath (str): Path to load the model from
-            method (str): Loading method ('joblib', 'pickle', or 'auto')
             
         Returns:
-            BaseEstimator: Loaded model
+            PipelineModel: Loaded PySpark ML Pipeline model
         """
-        ProjectLogger.log_step_header(logger, "STEP", "LOADING TRAINED MODEL")
+        ProjectLogger.log_step_header(logger, "STEP", "LOADING TRAINED PYSPARK MODEL")
         
         try:
             # Validate file exists
             if not os.path.exists(filepath):
-                raise ValueError(f"Model file not found: {filepath}")
+                raise ValueError(f"Model directory not found: {filepath}")
             
-            # Get file info
-            file_size = os.path.getsize(filepath)
-            file_modified = datetime.fromtimestamp(os.path.getmtime(filepath))
+            # Get directory info
+            total_size = 0
+            for dirpath, dirnames, filenames in os.walk(filepath):
+                for f in filenames:
+                    fp = os.path.join(dirpath, f)
+                    total_size += os.path.getsize(fp)
             
             logger.info(f"Loading model from: {filepath}")
-            logger.info(f"File size: {file_size:,} bytes ({file_size / 1024 / 1024:.2f} MB)")
-            logger.info(f"Last modified: {file_modified}")
-            
-            # Determine method
-            if method == 'auto':
-                if filepath.endswith('.pkl'):
-                    method = 'pickle'
-                else:
-                    method = 'joblib'
-            
-            logger.info(f"Loading method: {method}")
+            logger.info(f"Total size: {total_size:,} bytes ({total_size / 1024 / 1024:.2f} MB)")
             
             # Load model
-            if method == 'joblib':
-                model = joblib.load(filepath)
-            else:  # pickle
-                with open(filepath, 'rb') as f:
-                    model = pickle.load(f)
+            model = PipelineModel.load(filepath)
             
             logger.info(f"Model loaded successfully")
             logger.info(f"Model type: {type(model).__name__}")
+            logger.info(f"Pipeline stages: {len(model.stages)}")
             
-            ProjectLogger.log_success_header(logger, "MODEL LOADED SUCCESSFULLY")
+            ProjectLogger.log_success_header(logger, "PYSPARK MODEL LOADED SUCCESSFULLY")
             
             return model
             
@@ -216,64 +468,14 @@ class ModelTrainer:
             raise
 
 
-
-
-# @log_exceptions(logger)
-#     def train_with_cross_validation(
-#         self,
-#         model: BaseEstimator,
-#         X_train: pd.DataFrame,
-#         y_train: pd.Series,
-#         cv_folds: int = 5,
-#         scoring: str = 'accuracy'
-#     ) -> Tuple[BaseEstimator, Dict[str, float]]:
-#         """
-#         Train a model with cross-validation.
+def create_model_trainer(spark: Optional[SparkSession] = None) -> ModelTrainer:
+    """
+    Factory function to create a ModelTrainer instance.
+    
+    Args:
+        spark: Optional SparkSession
         
-#         Args:
-#             model: Scikit-learn compatible model
-#             X_train (pd.DataFrame): Training features
-#             y_train (pd.Series): Training targets
-#             cv_folds (int): Number of cross-validation folds
-#             scoring (str): Scoring metric for cross-validation
-            
-#         Returns:
-#             Tuple: (trained_model, cv_results)
-#         """
-#         ProjectLogger.log_step_header(logger, "STEP", "TRAINING MODEL WITH CROSS-VALIDATION")
-        
-#         try:
-#             logger.info(f"Cross-validation folds: {cv_folds}")
-#             logger.info(f"Scoring metric: {scoring}")
-            
-#             # Perform cross-validation before training
-#             logger.info("Performing cross-validation...")
-#             cv_scores = cross_val_score(model, X_train, y_train, cv=cv_folds, scoring=scoring)
-            
-#             cv_results = {
-#                 'mean_score': cv_scores.mean(),
-#                 'std_score': cv_scores.std(),
-#                 'min_score': cv_scores.min(),
-#                 'max_score': cv_scores.max(),
-#                 'individual_scores': cv_scores.tolist()
-#             }
-            
-#             logger.info("Cross-validation results:")
-#             logger.info(f"  - Mean {scoring}: {cv_results['mean_score']:.4f} (±{cv_results['std_score']:.4f})")
-#             logger.info(f"  - Min {scoring}: {cv_results['min_score']:.4f}")
-#             logger.info(f"  - Max {scoring}: {cv_results['max_score']:.4f}")
-            
-#             # Train the final model on all data
-#             logger.info("Training final model on complete dataset...")
-#             final_model, train_score = self.train_simple(model, X_train, y_train)
-            
-#             cv_results['final_train_score'] = train_score
-            
-#             ProjectLogger.log_success_header(logger, "CROSS-VALIDATION TRAINING COMPLETED")
-            
-#             return final_model, cv_results
-            
-#         except Exception as e:
-#             ProjectLogger.log_error_header(logger, "UNEXPECTED ERROR IN CV TRAINING")
-#             logger.error(f"Unexpected error: {str(e)}")
-#             raise
+    Returns:
+        ModelTrainer: Configured model trainer
+    """
+    return ModelTrainer(spark)

@@ -10,7 +10,7 @@ from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.types import StringType
 from pyspark.ml.feature import Imputer
-from spark_session import get_or_create_spark_session
+from spark_utils import get_spark_session
 
 # Initialize logger
 logger = get_logger(__name__)
@@ -22,7 +22,7 @@ class MissingValueHandlingStrategy(ABC):
     """
     def __init__(self, spark: Optional[SparkSession] = None):
         """Initialize with SparkSession."""
-        self.spark = spark or get_or_create_spark_session()
+        self.spark = spark or get_spark_session()
     
     @abstractmethod
     def handle(self, df: DataFrame) -> DataFrame:

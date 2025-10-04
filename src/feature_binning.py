@@ -6,7 +6,7 @@ from typing import Dict, List, Union, Tuple
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 from pyspark.ml.feature import Bucketizer
-from spark_session import get_or_create_spark_session
+from spark_utils import get_spark_session
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
 from logger import get_logger, ProjectLogger, log_exceptions
 
@@ -19,7 +19,7 @@ class FeatureBinningStrategy(ABC):
     """
     def __init__(self, spark: Optional[SparkSession] = None):
         """Initialize with SparkSession."""
-        self.spark = spark or get_or_create_spark_session()
+        self.spark = spark or get_spark_session()
 
     @abstractmethod
     def bin_feature(self, df: DataFrame, column: str) -> DataFrame:

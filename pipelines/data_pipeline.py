@@ -6,6 +6,7 @@ import numpy as np
 import mlflow
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
+from data_pipeline_pyspark import data_pipeline_pyspark
 from data_ingestion import DataIngestorCSV
 from handle_missing_values import DropMissingValuesStrategy, FillMissingValuesStrategy
 from outlier_detection import OutlierDetector, IQROutlierDetection
@@ -21,6 +22,65 @@ logger = get_logger(__name__)
 
 @log_exceptions(logger)
 def data_pipeline(
+    data_path: str = "./data/raw/TelcoCustomerChurnPrediction.csv",
+    target_column: str = 'Churn',
+    test_size: float = 0.2,
+    force_rebuild: bool = False,
+    use_pyspark: bool = True
+) -> Dict[str, np.ndarray]:
+    """
+    Execute data pipeline with option to use PySpark or pandas implementation.
+    
+    Args:
+        data_path (str): Path to the raw data file
+        target_column (str): Name of the target column
+        test_size (float): Proportion of data for testing
+        force_rebuild (bool): Whether to force rebuild processed data
+        use_pyspark (bool): Whether to use PySpark implementation (default: True)
+        
+    Returns:
+        Dict[str, np.ndarray]: Data arrays for backward compatibility
+    """
+    
+    if use_pyspark:
+        logger.info("Using PySpark data pipeline implementation")
+        pyspark_result = data_pipeline_pyspark(
+            data_path=data_path,
+            target_column=target_column,
+            test_size=test_size,
+            force_rebuild=force_rebuild
+        )
+        
+        # Convert PySpark DataFrames to pandas for backward compatibility
+        train_df = pyspark_result['train_df'].toPandas()
+        test_df = pyspark_result['test_df'].toPandas()
+        
+        # Separate features and target
+        feature_columns = [col for col in train_df.columns if col != target_column]
+        
+        X_train = train_df[feature_columns]
+        Y_train = train_df[target_column]
+        X_test = test_df[feature_columns]
+        Y_test = test_df[target_column]
+        
+        return {
+            'X_train': X_train.values,
+            'X_test': X_test.values,
+            'Y_train': Y_train.values,
+            'Y_test': Y_test.values
+        }
+    else:
+        # Use original pandas implementation
+        return data_pipeline_pandas_original(
+            data_path=data_path,
+            target_column=target_column,
+            test_size=test_size,
+            force_rebuild=force_rebuild
+        )
+
+
+@log_exceptions(logger)
+def data_pipeline_pandas_original(
     data_path: str = "./data/raw/TelcoCustomerChurnPrediction.csv",
                     target_column: str = 'Churn',
                     test_size: float = 0.2,

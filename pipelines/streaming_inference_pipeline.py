@@ -5,9 +5,11 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
 from mlflow_utils import MLflowTracker, create_mlflow_run_tags
 from model_inference import ModelInference
+from streaming_inference_pipeline_pyspark import streaming_inference_pyspark
 from logger import get_logger, ProjectLogger, log_exceptions
 import mlflow
 import time
+from typing import Dict, Any, Optional
 
 # Initialize logger
 logger = get_logger(__name__)
@@ -32,7 +34,43 @@ except Exception as e:
     raise
 
 @log_exceptions(logger)
-def streaming_inference(inference, data):
+def streaming_inference(
+    inference=None, 
+    data=None, 
+    use_pyspark: bool = True,
+    model_path: Optional[str] = None,
+    input_data: Optional[Dict[str, Any]] = None,
+    batch_data_path: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Perform streaming inference with option to use PySpark or pandas implementation.
+    
+    Args:
+        inference: ModelInference instance (for pandas implementation)
+        data: Data for inference (for pandas implementation)
+        use_pyspark (bool): Whether to use PySpark implementation
+        model_path (str): Path to model for PySpark implementation
+        input_data (Dict): Single customer data for PySpark prediction
+        batch_data_path (str): Path to batch data for PySpark prediction
+        
+    Returns:
+        Dict[str, Any]: Inference results
+    """
+    
+    if use_pyspark:
+        logger.info("Using PySpark streaming inference implementation")
+        return streaming_inference_pyspark(
+            model_path=model_path or "./artifacts/models/pyspark_pipeline_model",
+            input_data=input_data,
+            batch_data_path=batch_data_path
+        )
+    else:
+        # Use original pandas implementation
+        return streaming_inference_pandas_original(inference, data)
+
+
+@log_exceptions(logger)
+def streaming_inference_pandas_original(inference, data):
     """
     Perform streaming inference on incoming data.
 

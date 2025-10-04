@@ -1,13 +1,126 @@
 """
 Common PySpark utility functions for data processing and transformation.
+Includes session management and data processing utilities.
 """
 
 import logging
-from typing import List, Dict, Optional, Union, Tuple
+import os
+import yaml
+from typing import List, Dict, Optional, Union, Tuple, Any
 import pandas as pd
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, DoubleType, BooleanType
+from pyspark.conf import SparkConf
+
+logger = logging.getLogger(__name__)
+
+
+class SparkSessionManager:
+    """
+    Manages PySpark session creation and configuration.
+    """
+    
+    _instance = None
+    _spark_session = None
+    
+    def __new__(cls, config_path: Optional[str] = None):
+        if cls._instance is None:
+            cls._instance = super(SparkSessionManager, cls).__new__(cls)
+        return cls._instance
+    
+    def __init__(self, config_path: Optional[str] = None):
+        if not hasattr(self, '_initialized'):
+            self.config_path = config_path or 'config.yaml'
+            self.config = self._load_config()
+            self._initialized = True
+    
+    def _load_config(self) -> Dict[str, Any]:
+        """Load configuration from YAML file."""
+        try:
+            with open(self.config_path, 'r') as file:
+                config = yaml.safe_load(file)
+            return config.get('spark', {})
+        except Exception as e:
+            logger.warning(f"Could not load config from {self.config_path}: {e}")
+            return self._get_default_config()
+    
+    def _get_default_config(self) -> Dict[str, Any]:
+        """Get default Spark configuration."""
+        return {
+            'app_name': 'TelcoCustomerChurnPrediction',
+            'master': 'local[*]',
+            'config': {
+                'spark.sql.adaptive.enabled': 'true',
+                'spark.sql.adaptive.coalescePartitions.enabled': 'true',
+                'spark.serializer': 'org.apache.spark.serializer.KryoSerializer',
+                'spark.sql.execution.arrow.pyspark.enabled': 'true',
+            },
+            'memory': {
+                'driver_memory': '4g',
+                'executor_memory': '2g',
+                'max_result_size': '2g'
+            }
+        }
+    
+    def get_spark_session(self) -> SparkSession:
+        """Get or create Spark session with configured settings."""
+        if self._spark_session is None:
+            self._spark_session = self._create_spark_session()
+        return self._spark_session
+    
+    def _create_spark_session(self) -> SparkSession:
+        """Create a new Spark session with configuration."""
+        try:
+            conf = SparkConf()
+            app_name = self.config.get('app_name', 'TelcoCustomerChurnPrediction')
+            master = self.config.get('master', 'local[*]')
+            
+            conf.setAppName(app_name).setMaster(master)
+            
+            # Set memory configurations
+            memory_config = self.config.get('memory', {})
+            for key, value in memory_config.items():
+                if key == 'driver_memory':
+                    conf.set('spark.driver.memory', value)
+                elif key == 'executor_memory':
+                    conf.set('spark.executor.memory', value)
+                elif key == 'max_result_size':
+                    conf.set('spark.driver.maxResultSize', value)
+            
+            # Set additional configurations
+            spark_configs = self.config.get('config', {})
+            for key, value in spark_configs.items():
+                conf.set(key, str(value))
+            
+            spark = SparkSession.builder.config(conf=conf).getOrCreate()
+            spark.sparkContext.setLogLevel("WARN")
+            
+            logger.info(f"Spark session created: {app_name} on {master}")
+            return spark
+            
+        except Exception as e:
+            logger.error(f"Failed to create Spark session: {e}")
+            raise
+    
+    def stop_spark_session(self):
+        """Stop the current Spark session."""
+        if self._spark_session is not None:
+            self._spark_session.stop()
+            self._spark_session = None
+            logger.info("Spark session stopped")
+
+
+def get_spark_session(config_path: Optional[str] = None) -> SparkSession:
+    """Get Spark session using singleton pattern."""
+    manager = SparkSessionManager(config_path)
+    return manager.get_spark_session()
+
+
+def stop_spark_session():
+    """Stop the current Spark session."""
+    manager = SparkSessionManager()
+    manager.stop_spark_session()
 
 logger = logging.getLogger(__name__)
 

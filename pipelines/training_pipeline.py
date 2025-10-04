@@ -5,6 +5,7 @@ import mlflow
 import pandas as pd
 import pickle
 from data_pipeline import data_pipeline
+from training_pipeline_pyspark import training_pipeline_pyspark
 from typing import Dict, Any, Tuple, Optional
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
@@ -20,6 +21,47 @@ logger = get_logger(__name__)
 
 @log_exceptions(logger)
 def training_pipeline(
+                        data_path: str = 'data/raw/TelcoCustomerChurnPrediction.csv',
+                        model_params: Optional[Dict[str, Any]] = None,
+                        test_size: float = 0.2, 
+                        random_state: int = 42,
+                        model_path: str = 'artifacts/models/telco_customer_churn_prediction.joblib',
+                        use_pyspark: bool = True
+                    ) -> Dict[str, Any]:
+    """
+    Execute training pipeline with option to use PySpark or pandas implementation.
+    
+    Args:
+        data_path (str): Path to the raw data file
+        model_params (Optional[Dict[str, Any]]): Model hyperparameters
+        test_size (float): Proportion of data for testing
+        random_state (int): Random seed for reproducibility
+        model_path (str): Path to save the trained model
+        use_pyspark (bool): Whether to use PySpark implementation (default: True)
+        
+    Returns:
+        Dict[str, Any]: Training results including models and metrics
+    """
+    
+    if use_pyspark:
+        logger.info("Using PySpark training pipeline implementation")
+        return training_pipeline_pyspark(
+            data_path=data_path,
+            test_size=test_size
+        )
+    else:
+        # Use original pandas implementation
+        return training_pipeline_pandas_original(
+            data_path=data_path,
+            model_params=model_params,
+            test_size=test_size,
+            random_state=random_state,
+            model_path=model_path
+        )
+
+
+@log_exceptions(logger)
+def training_pipeline_pandas_original(
                         data_path: str = 'data/raw/TelcoCustomerChurnPrediction.csv',
                         model_params: Optional[Dict[str, Any]] = None,
                         test_size: float = 0.2, 

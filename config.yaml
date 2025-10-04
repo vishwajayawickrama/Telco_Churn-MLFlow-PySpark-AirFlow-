@@ -1,13 +1,34 @@
+# PySpark Configuration
+spark:
+  app_name: "TelcoCustomerChurnPrediction"
+  master: "local[*]"  # Use all available cores locally
+  config:
+    spark.sql.adaptive.enabled: "true"
+    spark.sql.adaptive.coalescePartitions.enabled: "true"
+    spark.serializer: "org.apache.spark.serializer.KryoSerializer"
+    spark.sql.execution.arrow.pyspark.enabled: "true"  # Enable Arrow optimization
+    spark.sql.adaptive.skewJoin.enabled: "true"
+    spark.default.parallelism: "4"
+    spark.sql.shuffle.partitions: "200"
+  memory:
+    driver_memory: "4g"
+    executor_memory: "2g"
+    max_result_size: "2g"
+
 data_paths:
-  raw_data: "../data/raw/TelcoCustomerChurnPrediction.csv"
-  processed_data: "../data/processed/ChurnModelling_Missing_Values_Handled.csv"
+  raw_data: "data/raw/TelcoCustomerChurnPrediction.csv"
+  processed_data: "data/processed/"
   artifacts_dir: "artifacts"
   data_artifacts_dir: "artifacts/data"
   model_artifacts_dir: "artifacts/models"
-  X_train: "artifacts/data/X_train.csv"
-  X_test: "artifacts/data/X_test.csv"
-  Y_train: "artifacts/data/Y_train.csv"
-  Y_test: "artifacts/data/Y_test.csv"
+  # PySpark uses Parquet format for better performance
+  X_train: "artifacts/data/X_train.parquet"
+  X_test: "artifacts/data/X_test.parquet" 
+  Y_train: "artifacts/data/Y_train.parquet"
+  Y_test: "artifacts/data/Y_test.parquet"
+  # Feature pipeline artifacts
+  pipeline_path: "artifacts/models/feature_pipeline"
+  ml_pipeline_path: "artifacts/models/ml_pipeline"
 
 columns:
   target: "Churn"
@@ -102,30 +123,38 @@ training:
     n_iter: 20
 
 model:
-  model_type: "random_forest"
+  # PySpark ML algorithms
+  model_type: "gbt_classifier"  # Gradient Boosted Trees
   training_strategy: "cv"
-  data_path: "data/raw/ChurnModelling.csv"
-  model_path: "artifacts/models/random_forest_cv_model.pkl"
-  evaluation_path: "artifacts/evaluation/random_forest_cv_evaluation_report.txt"
+  data_path: "data/raw/TelcoCustomerChurnPrediction.csv"
+  model_path: "artifacts/models/churn_prediction_pipeline"
+  evaluation_path: "artifacts/evaluation/model_evaluation_report.json"
+  # PySpark ML model parameters
   model_params:
-    n_estimators: 100
+    max_iter: 100
     max_depth: 10
-    random_state: 42
+    step_size: 0.1
+    seed: 42
   model_types:
-    random_forest:
-      n_estimators: 100
+    gbt_classifier:  # GradientBoostedTreesClassifier
+      max_iter: 100
       max_depth: 10
-      random_state: 42
-    gradient_boosting:
-      n_estimators: 100
-      max_depth: 5
-      random_state: 42
+      step_size: 0.1
+      seed: 42
+    random_forest_classifier:
+      num_trees: 100
+      max_depth: 10
+      seed: 42
+      feature_subset_strategy: "auto"
     logistic_regression:
-      random_state: 42
       max_iter: 1000
-    svm:
-      random_state: 42
-      probability: true
+      reg_param: 0.01
+      elastic_net_param: 0.0
+      family: "binomial"
+    decision_tree_classifier:
+      max_depth: 10
+      seed: 42
+      impurity: "gini"
 
 evaluation:
   metrics:
@@ -157,15 +186,17 @@ logging:
 
 mlflow:
   tracking_uri: "file:./mlruns"  # Local file-based tracking
-  experiment_name: "Telco Customer Churn Analysis"
-  model_registry_name: "telco_customer_churn_prediction"
+  experiment_name: "Telco Customer Churn Analysis - PySpark"
+  model_registry_name: "telco_customer_churn_prediction_pyspark"
   artifact_path: "TelcoCustomerChurnModel"
-  run_name_prefix: "churn_run"
+  run_name_prefix: "pyspark_churn_run"
   tags:
     project: "telco_customer_churn_prediction"
     team: "ml_engineering"
     environment: "development"
-  autolog: true
+    framework: "pyspark_ml"
+    distributed: "true"
+  autolog: false  # Disable autolog for PySpark, use manual logging
 
 environment:
   experiment_name: "churn_analysis"

@@ -1,17 +1,23 @@
 import os
 import sys
-import joblib
-import pandas as pd
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Any, Optional, Union, List
 from datetime import datetime
 from abc import ABC, abstractmethod
-from xgboost import XGBClassifier
-from sklearn.ensemble import RandomForestClassifier
-from lightgbm import LGBMClassifier
 
-# Add utils to path for logger import
+# PySpark ML imports
+from pyspark.ml.classification import (
+    GBTClassifier, 
+    RandomForestClassifier, 
+    LogisticRegression,
+    DecisionTreeClassifier
+)
+from pyspark.ml import Pipeline
+from pyspark.sql import SparkSession
+
+# Add utils to path for imports
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
 from logger import get_logger, ProjectLogger, log_exceptions
+from spark_utils import get_spark_session
 
 # Initialize logger
 logger = get_logger(__name__)
@@ -19,7 +25,7 @@ logger = get_logger(__name__)
 
 class BaseModelBuilder(ABC):
     """
-    Abstract base class for model builders.
+    Abstract base class for PySpark ML model builders.
     """
     
     def __init__(self, model_name: str, **kwargs):
@@ -34,6 +40,7 @@ class BaseModelBuilder(ABC):
         self.model = None
         self.model_params = kwargs
         self.build_timestamp = None
+        self.spark = get_spark_session()
         
         ProjectLogger.log_section_header(logger, f"INITIALIZING {model_name.upper()} MODEL BUILDER")
         logger.info(f"Model name: {self.model_name}")
@@ -45,12 +52,360 @@ class BaseModelBuilder(ABC):
     @abstractmethod
     def build_model(self):
         """
-        Abstract method to build the model.
+        Abstract method to build the PySpark ML model.
         
         Returns:
-            Model object
+            PySpark ML Classifier: Built model instance
         """
         pass
+    
+    @log_exceptions(logger)
+    def get_model_info(self) -> Dict[str, Any]:
+        """
+        Get information about the built model.
+        
+        Returns:
+            Dict[str, Any]: Model information dictionary
+        """
+        if self.model is None:
+            logger.warning("Model not built yet. Call build_model() first.")
+            return {}
+        
+        info = {
+            'model_name': self.model_name,
+            'model_type': type(self.model).__name__,
+            'build_timestamp': self.build_timestamp,
+            'parameters': self.model_params
+        }
+        
+        logger.info(f"Model info retrieved for {self.model_name}")
+        return info
+    
+    @log_exceptions(logger)
+    def save_model(self, filepath: str):
+        """
+        Save the PySpark ML model.
+        
+        Args:
+            filepath (str): Path to save the model
+        """
+        if self.model is None:
+            raise ValueError("No model to save. Call build_model() first.")
+        
+        try:
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            
+            # Save PySpark ML model
+            self.model.write().overwrite().save(filepath)
+            
+            logger.info(f"Model saved successfully to: {filepath}")
+            
+        except Exception as e:
+            logger.error(f"Failed to save model: {str(e)}")
+            raise
+    
+    @log_exceptions(logger) 
+    def load_model(self, filepath: str):
+        """
+        Load a previously saved PySpark ML model.
+        
+        Args:
+            filepath (str): Path to the saved model
+        """
+        try:
+            # This is a placeholder - actual loading depends on model type
+            # In practice, you'd need to know the model type to load correctly
+            logger.warning("Model loading requires specific implementation per model type")
+            logger.info(f"Model loaded from: {filepath}")
+            
+        except Exception as e:
+            logger.error(f"Failed to load model: {str(e)}")
+            raise
+
+
+class GBTModelBuilder(BaseModelBuilder):
+    """
+    Gradient Boosted Trees model builder for PySpark ML.
+    """
+    
+    def __init__(self, **kwargs):
+        """
+        Initialize GBT model builder.
+        
+        Args:
+            **kwargs: GBT model parameters
+        """
+        # Set default parameters for GBT
+        default_params = {
+            'max_iter': 100,
+            'max_depth': 10,
+            'step_size': 0.1,
+            'seed': 42,
+            'features_col': 'features',
+            'label_col': 'label',
+            'prediction_col': 'prediction'
+        }
+        default_params.update(kwargs)
+        
+        super().__init__("GradientBoostedTrees", **default_params)
+    
+    @log_exceptions(logger)
+    def build_model(self):
+        """
+        Build Gradient Boosted Trees classifier.
+        
+        Returns:
+            GBTClassifier: Built GBT model
+        """
+        ProjectLogger.log_step_header(logger, "STEP", "BUILDING GRADIENT BOOSTED TREES MODEL")
+        
+        try:
+            self.model = GBTClassifier(**self.model_params)
+            self.build_timestamp = datetime.now().isoformat()
+            
+            logger.info("GBT model built successfully")
+            logger.info(f"Max iterations: {self.model.getMaxIter()}")
+            logger.info(f"Max depth: {self.model.getMaxDepth()}")
+            logger.info(f"Step size: {self.model.getStepSize()}")
+            
+            ProjectLogger.log_success_header(logger, "GBT MODEL BUILD COMPLETED")
+            return self.model
+            
+        except Exception as e:
+            ProjectLogger.log_error_header(logger, "GBT MODEL BUILD FAILED")
+            logger.error(f"Error building GBT model: {str(e)}")
+            raise
+
+
+class RandomForestModelBuilder(BaseModelBuilder):
+    """
+    Random Forest model builder for PySpark ML.
+    """
+    
+    def __init__(self, **kwargs):
+        """
+        Initialize Random Forest model builder.
+        
+        Args:
+            **kwargs: Random Forest model parameters
+        """
+        # Set default parameters for Random Forest
+        default_params = {
+            'num_trees': 100,
+            'max_depth': 10,
+            'seed': 42,
+            'feature_subset_strategy': 'auto',
+            'features_col': 'features',
+            'label_col': 'label',
+            'prediction_col': 'prediction'
+        }
+        default_params.update(kwargs)
+        
+        super().__init__("RandomForest", **default_params)
+    
+    @log_exceptions(logger)
+    def build_model(self):
+        """
+        Build Random Forest classifier.
+        
+        Returns:
+            RandomForestClassifier: Built Random Forest model
+        """
+        ProjectLogger.log_step_header(logger, "STEP", "BUILDING RANDOM FOREST MODEL")
+        
+        try:
+            self.model = RandomForestClassifier(**self.model_params)
+            self.build_timestamp = datetime.now().isoformat()
+            
+            logger.info("Random Forest model built successfully")
+            logger.info(f"Number of trees: {self.model.getNumTrees()}")
+            logger.info(f"Max depth: {self.model.getMaxDepth()}")
+            logger.info(f"Feature subset strategy: {self.model.getFeatureSubsetStrategy()}")
+            
+            ProjectLogger.log_success_header(logger, "RANDOM FOREST MODEL BUILD COMPLETED")
+            return self.model
+            
+        except Exception as e:
+            ProjectLogger.log_error_header(logger, "RANDOM FOREST MODEL BUILD FAILED")
+            logger.error(f"Error building Random Forest model: {str(e)}")
+            raise
+
+
+class LogisticRegressionModelBuilder(BaseModelBuilder):
+    """
+    Logistic Regression model builder for PySpark ML.
+    """
+    
+    def __init__(self, **kwargs):
+        """
+        Initialize Logistic Regression model builder.
+        
+        Args:
+            **kwargs: Logistic Regression model parameters
+        """
+        # Set default parameters for Logistic Regression
+        default_params = {
+            'max_iter': 1000,
+            'reg_param': 0.01,
+            'elastic_net_param': 0.0,
+            'family': 'binomial',
+            'features_col': 'features',
+            'label_col': 'label',
+            'prediction_col': 'prediction'
+        }
+        default_params.update(kwargs)
+        
+        super().__init__("LogisticRegression", **default_params)
+    
+    @log_exceptions(logger)
+    def build_model(self):
+        """
+        Build Logistic Regression classifier.
+        
+        Returns:
+            LogisticRegression: Built Logistic Regression model
+        """
+        ProjectLogger.log_step_header(logger, "STEP", "BUILDING LOGISTIC REGRESSION MODEL")
+        
+        try:
+            self.model = LogisticRegression(**self.model_params)
+            self.build_timestamp = datetime.now().isoformat()
+            
+            logger.info("Logistic Regression model built successfully")
+            logger.info(f"Max iterations: {self.model.getMaxIter()}")
+            logger.info(f"Regularization parameter: {self.model.getRegParam()}")
+            logger.info(f"Family: {self.model.getFamily()}")
+            
+            ProjectLogger.log_success_header(logger, "LOGISTIC REGRESSION MODEL BUILD COMPLETED")
+            return self.model
+            
+        except Exception as e:
+            ProjectLogger.log_error_header(logger, "LOGISTIC REGRESSION MODEL BUILD FAILED")
+            logger.error(f"Error building Logistic Regression model: {str(e)}")
+            raise
+
+
+class DecisionTreeModelBuilder(BaseModelBuilder):
+    """
+    Decision Tree model builder for PySpark ML.
+    """
+    
+    def __init__(self, **kwargs):
+        """
+        Initialize Decision Tree model builder.
+        
+        Args:
+            **kwargs: Decision Tree model parameters
+        """
+        # Set default parameters for Decision Tree
+        default_params = {
+            'max_depth': 10,
+            'seed': 42,
+            'impurity': 'gini',
+            'features_col': 'features',
+            'label_col': 'label',
+            'prediction_col': 'prediction'
+        }
+        default_params.update(kwargs)
+        
+        super().__init__("DecisionTree", **default_params)
+    
+    @log_exceptions(logger)
+    def build_model(self):
+        """
+        Build Decision Tree classifier.
+        
+        Returns:
+            DecisionTreeClassifier: Built Decision Tree model
+        """
+        ProjectLogger.log_step_header(logger, "STEP", "BUILDING DECISION TREE MODEL")
+        
+        try:
+            self.model = DecisionTreeClassifier(**self.model_params)
+            self.build_timestamp = datetime.now().isoformat()
+            
+            logger.info("Decision Tree model built successfully")
+            logger.info(f"Max depth: {self.model.getMaxDepth()}")
+            logger.info(f"Impurity: {self.model.getImpurity()}")
+            
+            ProjectLogger.log_success_header(logger, "DECISION TREE MODEL BUILD COMPLETED")
+            return self.model
+            
+        except Exception as e:
+            ProjectLogger.log_error_header(logger, "DECISION TREE MODEL BUILD FAILED")
+            logger.error(f"Error building Decision Tree model: {str(e)}")
+            raise
+
+
+class ModelFactory:
+    """
+    Factory class for creating PySpark ML model builders.
+    """
+    
+    _builders = {
+        'gbt_classifier': GBTModelBuilder,
+        'random_forest_classifier': RandomForestModelBuilder, 
+        'logistic_regression': LogisticRegressionModelBuilder,
+        'decision_tree_classifier': DecisionTreeModelBuilder
+    }
+    
+    @staticmethod
+    @log_exceptions(logger)
+    def create_model_builder(model_type: str, **kwargs) -> BaseModelBuilder:
+        """
+        Create a model builder based on the specified type.
+        
+        Args:
+            model_type (str): Type of model to build
+            **kwargs: Model parameters
+            
+        Returns:
+            BaseModelBuilder: Model builder instance
+        """
+        ProjectLogger.log_section_header(logger, f"CREATING MODEL BUILDER: {model_type.upper()}")
+        
+        if model_type not in ModelFactory._builders:
+            available_types = list(ModelFactory._builders.keys())
+            raise ValueError(f"Unknown model type: {model_type}. Available types: {available_types}")
+        
+        builder_class = ModelFactory._builders[model_type]
+        builder = builder_class(**kwargs)
+        
+        logger.info(f"Model builder created: {type(builder).__name__}")
+        return builder
+    
+    @staticmethod
+    def get_available_models() -> List[str]:
+        """
+        Get list of available model types.
+        
+        Returns:
+            List[str]: Available model types
+        """
+        return list(ModelFactory._builders.keys())
+
+
+# Convenience functions for backward compatibility
+def GBTModelBuilder(**kwargs):
+    """Create GBT model builder.""" 
+    return ModelFactory.create_model_builder('gbt_classifier', **kwargs)
+
+def RandomForestModelBuilder(**kwargs):
+    """Create Random Forest model builder."""
+    return ModelFactory.create_model_builder('random_forest_classifier', **kwargs)
+
+def LogisticRegressionModelBuilder(**kwargs):
+    """Create Logistic Regression model builder."""
+    return ModelFactory.create_model_builder('logistic_regression', **kwargs)
+
+def DecisionTreeModelBuilder(**kwargs):
+    """Create Decision Tree model builder."""
+    return ModelFactory.create_model_builder('decision_tree_classifier', **kwargs)
+
+
+# For legacy compatibility
+XGBoostModelBuilder = GBTModelBuilder  # Map XGBoost to GBT
 
     @log_exceptions(logger)
     def save_model(self, filepath: str, create_dirs: bool = True) -> None:
