@@ -1,3 +1,5 @@
+<div align="center">
+
 # Telco Customer Churn Prediction - PySpark Implementation
 
 ![PySpark](https://img.shields.io/badge/PySpark-3.4.0+-orange)
@@ -8,7 +10,9 @@
 ![NumPy](https://img.shields.io/badge/NumPy-1.21.0+-blue)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
-## 📚 Technology Stack
+</div>
+
+## Technology Stack
 
 ### Core Technologies
 - **Apache Spark (PySpark 3.4.0+)**: Distributed data processing and ML
@@ -34,22 +38,22 @@
 - **Plotly (5.10.0+)**: Interactive plots
 - **W&B (0.15.0+)**: Experiment tracking (optional)
 
-## 🚀 Overview
+## Overview
 
 A production-ready customer churn prediction system built with **PySpark ML** for distributed computing and scalable machine learning. This implementation provides enterprise-grade features including distributed data processing, **Apache Airflow** orchestration for workflow management, real-time inference, and comprehensive MLflow integration for experiment tracking and model registry.
 
-### ✨ Key Features
+### Key Features
 
-- 🔥 **Distributed Computing**: Scale from single machine to cluster deployment with Apache Spark
-- 🤖 **Advanced ML Pipeline**: End-to-end PySpark ML with 4 algorithms (GBT, Random Forest, Logistic Regression, Decision Tree)
-- 📊 **Real-time Streaming**: Live predictions with Structured Streaming
-- 🔄 **Airflow Orchestration**: Automated workflow management with 3 production DAGs (ML Pipeline, Hyperparameter Tuning, Model Monitoring)
-- 📈 **MLflow Integration**: Experiment tracking, model registry, and artifact management
-- 🔧 **Makefile Automation**: Simplified setup and execution with `make` commands
-- 🛠️ **Production Ready**: Comprehensive logging, error handling, and monitoring
-- 📦 **Modular Architecture**: Separate modules for data ingestion, feature engineering, model training, and inference
+- **Distributed Computing**: Scale from single machine to cluster deployment with Apache Spark
+- **Advanced ML Pipeline**: End-to-end PySpark ML with 4 algorithms (GBT, Random Forest, Logistic Regression, Decision Tree)
+- **Real-time Streaming**: Live predictions with Structured Streaming
+- **Airflow Orchestration**: Automated workflow management with 3 production DAGs (ML Pipeline, Hyperparameter Tuning, Model Monitoring)
+- **MLflow Integration**: Experiment tracking, model registry, and artifact management
+- **Makefile Automation**: Simplified setup and execution with `make` commands
+- **Production Ready**: Comprehensive logging, error handling, and monitoring
+- **Modular Architecture**: Separate modules for data ingestion, feature engineering, model training, and inference
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
@@ -84,7 +88,7 @@ A production-ready customer churn prediction system built with **PySpark ML** fo
 
 > **Note**: Kafka integration is planned for future releases to enable real-time data streaming.
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1. Prerequisites
 
@@ -159,7 +163,7 @@ result = training_pipeline(
 print(f"Model accuracy: {result['evaluation_metrics']['accuracy']:.4f}")
 ```
 
-## 📊 Usage Examples
+## Usage Examples
 
 ### Airflow DAG Orchestration
 
@@ -254,7 +258,7 @@ prediction = streaming_inference(
 print(f"Churn probability: {prediction['single_prediction']['churn_probability']:.4f}")
 ```
 
-## 🔧 Configuration
+## Configuration
 
 ### Available Makefile Commands
 
@@ -346,7 +350,7 @@ Airflow DAGs are configured with:
 - **Email Notifications**: Enabled for failures
 - **Schedule**: Configurable per DAG (default: daily)
 
-## 🚀 Deployment Options
+## Deployment Options
 
 ### Local Development
 
@@ -413,7 +417,7 @@ gcloud dataproc clusters create telco-churn-cluster \
   --max-workers 10
 ```
 
-## 📈 Performance Optimization
+## Performance Optimization
 
 ### Memory Tuning
 
@@ -432,7 +436,7 @@ gcloud dataproc clusters create telco-churn-cluster \
 4. **Broadcast Joins**: Use for small lookup tables
 5. **Enable AQE**: Adaptive Query Execution for optimization
 
-## 🧪 Testing
+## Testing
 
 ### Run All Pipelines
 
@@ -485,7 +489,7 @@ airflow dags test telco_churn_ml_pipeline_dag 2024-01-01
 airflow dags trigger telco_churn_ml_pipeline_dag
 ```
 
-## 📊 Monitoring & Observability
+## Monitoring & Observability
 
 ### Airflow UI
 - **Local**: http://localhost:8080
@@ -518,7 +522,7 @@ All components include comprehensive logging:
 - **Inference**: Prediction results and timing
 - **Errors**: Detailed error tracking and recovery
 
-## 🔍 Troubleshooting
+## Troubleshooting
 
 ### Common Issues
 
@@ -543,7 +547,7 @@ Ensure all functions used in Spark transformations are serializable.
 - Optimize partition sizes
 - Enable adaptive query execution
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 .
@@ -594,7 +598,7 @@ Note: data/ directory structure is created at runtime when pipelines are execute
       Raw data should be placed in data/raw/ directory.
 ```
 
-## 🤝 Contributing
+## Contributing
 
 1. Fork the repository
 2. Create feature branch (`git checkout -b feature/amazing-feature`)
@@ -602,11 +606,11 @@ Note: data/ directory structure is created at runtime when pipelines are execute
 4. Push to branch (`git push origin feature/amazing-feature`)
 5. Open Pull Request
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - **Apache Spark** for distributed computing framework
 - **Apache Airflow** for workflow orchestration and scheduling
@@ -614,7 +618,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **PySpark ML** for scalable machine learning capabilities
 - **Community** for continuous support and contributions
 
-## 🚧 Future Enhancements
+## Future Enhancements
 
 - [ ] **Kafka Integration**: Real-time data streaming from Kafka topics
 - [ ] **REST API**: FastAPI-based prediction service
@@ -626,7 +630,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-## 📞 Support
+## Support
 
 For questions, issues, or contributions:
 
@@ -636,6 +640,6 @@ For questions, issues, or contributions:
 
 ---
 
-**🚀 Built for scalable, production-ready machine learning with PySpark, Airflow, and MLflow!**
+**Built for scalable, production-ready machine learning with PySpark, Airflow, and MLflow!**
 
-*Developed with ❤️ for enterprise-scale machine learning and automated workflow orchestration*
+*Developed for enterprise-scale machine learning and automated workflow orchestration*
