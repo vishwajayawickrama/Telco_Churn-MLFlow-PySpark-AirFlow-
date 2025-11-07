@@ -1,22 +1,53 @@
 # Telco Customer Churn Prediction - PySpark Implementation
 
-![PySpark](https://img.shields.io/badge/PySpark-3.4.0-orange)
-![MLflow](https://img.shields.io/badge/MLflow-2.6.0-blue)
+![PySpark](https://img.shields.io/badge/PySpark-3.4.0+-orange)
+![MLflow](https://img.shields.io/badge/MLflow-2.0.0+-blue)
+![Airflow](https://img.shields.io/badge/Airflow-2.7.0-red)
 ![Python](https://img.shields.io/badge/Python-3.8+-green)
+![Pandas](https://img.shields.io/badge/Pandas-1.5.0+-purple)
+![NumPy](https://img.shields.io/badge/NumPy-1.21.0+-blue)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
+
+## 📚 Technology Stack
+
+### Core Technologies
+- **Apache Spark (PySpark 3.4.0+)**: Distributed data processing and ML
+- **Apache Airflow (2.7.0)**: Workflow orchestration and scheduling
+- **MLflow (2.0.0+)**: Experiment tracking and model registry
+- **Python (3.8+)**: Primary programming language
+
+### Data Processing & ML
+- **PySpark ML**: Machine learning algorithms (GBT, Random Forest, Logistic Regression, Decision Tree)
+- **Pandas (1.5.0+)**: Data manipulation and analysis
+- **NumPy (1.21.0+)**: Numerical computing
+- **PyArrow (5.0.0+)**: Efficient data transfer between Pandas and Spark
+
+### Development & Deployment
+- **Make**: Build automation and task execution
+- **FastAPI (0.95.0+)**: API deployment (planned)
+- **Uvicorn (0.20.0+)**: ASGI server
+- **Delta Lake (2.0.0+)**: Data lake storage (optional)
+
+### Monitoring & Visualization
+- **Matplotlib (3.5.0+)**: Data visualization
+- **Seaborn (0.11.0+)**: Statistical visualizations
+- **Plotly (5.10.0+)**: Interactive plots
+- **W&B (0.15.0+)**: Experiment tracking (optional)
 
 ## 🚀 Overview
 
-A production-ready customer churn prediction system built with **PySpark ML** for distributed computing and scalable machine learning. This implementation provides enterprise-grade features including distributed data processing, real-time inference, and comprehensive MLflow integration.
+A production-ready customer churn prediction system built with **PySpark ML** for distributed computing and scalable machine learning. This implementation provides enterprise-grade features including distributed data processing, **Apache Airflow** orchestration for workflow management, real-time inference, and comprehensive MLflow integration for experiment tracking and model registry.
 
 ### ✨ Key Features
 
-- 🔥 **Distributed Computing**: Scale from single machine to cluster deployment
-- 🤖 **Advanced ML Pipeline**: End-to-end PySpark ML with 4 algorithms
+- 🔥 **Distributed Computing**: Scale from single machine to cluster deployment with Apache Spark
+- 🤖 **Advanced ML Pipeline**: End-to-end PySpark ML with 4 algorithms (GBT, Random Forest, Logistic Regression, Decision Tree)
 - 📊 **Real-time Streaming**: Live predictions with Structured Streaming
-- 📈 **MLflow Integration**: Experiment tracking and model registry
-- 🔄 **Backward Compatible**: Seamless fallback to pandas implementation
+- 🔄 **Airflow Orchestration**: Automated workflow management with 3 production DAGs (ML Pipeline, Hyperparameter Tuning, Model Monitoring)
+- 📈 **MLflow Integration**: Experiment tracking, model registry, and artifact management
+- 🔧 **Makefile Automation**: Simplified setup and execution with `make` commands
 - 🛠️ **Production Ready**: Comprehensive logging, error handling, and monitoring
+- 📦 **Modular Architecture**: Separate modules for data ingestion, feature engineering, model training, and inference
 
 ## 🏗️ Architecture
 
@@ -27,6 +58,18 @@ A production-ready customer churn prediction system built with **PySpark ML** fo
 └─────────────────┘    └──────────────────┘    └─────────────────┘
                                 │
                                 ▼
+        ┌───────────────────────────────────────────────┐
+        │         Apache Airflow Orchestration          │
+        │  ┌──────────────┐  ┌──────────────────────┐  │
+        │  │ ML Pipeline  │  │ Hyperparameter Tuning│  │
+        │  │     DAG      │  │        DAG           │  │
+        │  └──────────────┘  └──────────────────────┘  │
+        │  ┌──────────────────────────────────────┐    │
+        │  │    Model Monitoring DAG              │    │
+        │  └──────────────────────────────────────┘    │
+        └───────────────────────────────────────────────┘
+                                │
+                                ▼
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
 │  Model Registry │◀───│  PySpark ML      │───▶│  Trained Models │
 │  (MLflow)       │    │  Training        │    │  (Pipeline)     │
@@ -35,9 +78,11 @@ A production-ready customer churn prediction system built with **PySpark ML** fo
                                 ▼
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
 │  Predictions    │◀───│  Streaming       │◀───│  Live Data      │
-│  (Real-time)    │    │  Inference       │    │  (JSON/Kafka)   │
+│  (Real-time)    │    │  Inference       │    │  (JSON Stream)  │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
 ```
+
+> **Note**: Kafka integration is planned for future releases to enable real-time data streaming.
 
 ## 🚀 Quick Start
 
@@ -46,11 +91,12 @@ A production-ready customer churn prediction system built with **PySpark ML** fo
 ```bash
 # Required
 - Python 3.8+
-- Java 8 or 11
+- Java 8 or 11 (for PySpark)
 - Minimum 4GB RAM (8GB+ recommended)
 
 # Optional (for cluster deployment)
 - Apache Spark 3.4.0+
+- Apache Airflow 2.7.0 (installed via Makefile)
 - Hadoop (for YARN deployment)
 - Kubernetes (for K8s deployment)
 ```
@@ -59,27 +105,47 @@ A production-ready customer churn prediction system built with **PySpark ML** fo
 
 ```bash
 # Clone repository
-git clone <repository-url>
-cd telco-churn-pyspark
+git clone https://github.com/vishwajayawickrama/Telco_Churn_Prediction_MLFlow_PySpark_AirFlow_Kafka.git
+cd Telco_Churn_Prediction_MLFlow_PySpark_AirFlow_Kafka
 
-# Install dependencies
-pip install -r requirements.txt
+# Install dependencies using Makefile
+make install
 
-# Verify installation
-python -c "import pyspark; print(f'PySpark {pyspark.__version__} installed successfully')"
+# Activate virtual environment
+source .venv/bin/activate
 ```
 
-### 3. Configuration
+### 3. Setup Airflow (Optional for Workflow Orchestration)
 
 ```bash
-# Copy example configuration
-cp config.example.yaml config.yaml
+# Setup local Airflow environment
+make setup-local-airflow
 
-# Edit configuration (optional)
-nano config.yaml
+# Start Airflow services
+make airflow-start
+
+# Access Airflow UI at http://localhost:8080
+# Username: admin, Password: admin
 ```
 
-### 4. Run Training Pipeline
+### 4. Run Pipelines
+
+#### Using Makefile (Recommended)
+
+```bash
+# Run complete ML pipeline
+make run-all
+
+# Or run individual pipelines
+make data-pipeline        # Data preprocessing
+make train-pipeline       # Model training
+make streaming-inference  # Inference pipeline
+
+# Start MLflow UI
+make mlflow-ui           # Access at http://localhost:5001
+```
+
+#### Using Python Directly
 
 ```python
 from pipelines.training_pipeline import training_pipeline
@@ -94,6 +160,42 @@ print(f"Model accuracy: {result['evaluation_metrics']['accuracy']:.4f}")
 ```
 
 ## 📊 Usage Examples
+
+### Airflow DAG Orchestration
+
+The project includes three production-ready Airflow DAGs for automated workflow management:
+
+#### 1. ML Pipeline DAG (`telco_churn_ml_pipeline_dag.py`)
+Complete end-to-end ML pipeline orchestration:
+```python
+# Automated workflow includes:
+# - Data preprocessing and feature engineering
+# - Model training with hyperparameter tuning
+# - Model evaluation and validation
+# - Inference generation and result storage
+# - Slack notifications for pipeline status
+```
+
+#### 2. Hyperparameter Tuning DAG (`telco_churn_hyperparameter_tuning_dag.py`)
+Automated hyperparameter optimization:
+```python
+# Parallel tuning for multiple models:
+# - Gradient Boosted Trees
+# - Random Forest
+# - Logistic Regression
+# - Decision Tree
+# - Best model selection and registration
+```
+
+#### 3. Model Monitoring DAG (`telco_churn_model_monitoring_dag.py`)
+Production model monitoring and drift detection:
+```python
+# Continuous monitoring:
+# - Model performance tracking
+# - Data drift detection
+# - Prediction quality monitoring
+# - Automated retraining triggers
+```
 
 ### Data Processing
 
@@ -154,6 +256,34 @@ print(f"Churn probability: {prediction['single_prediction']['churn_probability']
 
 ## 🔧 Configuration
 
+### Available Makefile Commands
+
+```bash
+# Installation and Setup
+make install                 # Install dependencies and create virtual environment
+make setup-local-airflow    # Initialize local Airflow environment
+make clean                  # Clean up generated artifacts
+
+# Pipeline Execution
+make data-pipeline          # Run data preprocessing pipeline
+make train-pipeline         # Run model training pipeline
+make streaming-inference    # Run streaming inference pipeline
+make run-all               # Execute all pipelines sequentially
+
+# Airflow Operations
+make airflow-start         # Start Airflow webserver and scheduler
+make airflow-stop          # Stop Airflow services
+make start-pipeline        # Start complete ML pipeline (Airflow + MLflow)
+
+# MLflow Operations
+make mlflow-ui            # Launch MLflow UI (default port: 5001)
+make mlflow-clean         # Clean MLflow artifacts
+make stop-all             # Stop all MLflow servers
+
+# Development
+make help                 # Display all available commands
+```
+
 ### Spark Configuration (`config.yaml`)
 
 ```yaml
@@ -182,28 +312,55 @@ mlflow:
 
 ```yaml
 model:
-  algorithms:
-    gbt:
-      maxDepth: 5
-      maxIter: 20
-    random_forest:
-      numTrees: 100
-      maxDepth: 5
+  # PySpark ML algorithms supported
+  model_type: "gbt_classifier"  # Options: gbt_classifier, random_forest_classifier, 
+                                 #          logistic_regression, decision_tree_classifier
+  model_types:
+    gbt_classifier:              # Gradient Boosted Trees
+      max_iter: 100
+      max_depth: 10
+      step_size: 0.1
+      seed: 42
+    random_forest_classifier:
+      num_trees: 100
+      max_depth: 10
+      seed: 42
+      feature_subset_strategy: "auto"
     logistic_regression:
-      maxIter: 100
-      regParam: 0.01
+      max_iter: 1000
+      reg_param: 0.01
+      elastic_net_param: 0.0
+      family: "binomial"
+    decision_tree_classifier:
+      max_depth: 10
+      seed: 42
+      impurity: "gini"
 ```
+
+### Airflow Configuration
+
+Airflow DAGs are configured with:
+- **Default Owner**: data-science-team
+- **Retries**: 2 with 5-minute delay
+- **Execution Timeout**: 4 hours
+- **Email Notifications**: Enabled for failures
+- **Schedule**: Configurable per DAG (default: daily)
 
 ## 🚀 Deployment Options
 
 ### Local Development
 
 ```bash
-# Single machine with all cores
-python pipelines/training_pipeline.py
+# Single machine with all cores (using Makefile)
+make run-all
+
+# Or with Airflow orchestration
+make start-pipeline
+# Access Airflow UI: http://localhost:8080
+# Access MLflow UI: http://localhost:5001
 ```
 
-### Standalone Cluster
+### Standalone Spark Cluster
 
 ```bash
 # Start Spark cluster
@@ -215,7 +372,7 @@ spark-submit \
   --master spark://master:7077 \
   --executor-memory 4g \
   --driver-memory 2g \
-  pipelines/training_pipeline_pyspark.py
+  pipelines/training_pipeline.py
 ```
 
 ### YARN Cluster
@@ -277,48 +434,82 @@ gcloud dataproc clusters create telco-churn-cluster \
 
 ## 🧪 Testing
 
-### Run All Tests
+### Run All Pipelines
 
 ```bash
-# Complete integration test
-python test_end_to_end.py
+# Using Makefile (Recommended)
+make run-all
 
-# Migration validation
-python test_migration.py
-
-# Demonstration
-python migration_demo.py
+# Individual pipelines
+make data-pipeline
+make train-pipeline
+make streaming-inference
 ```
 
 ### Test Individual Components
 
 ```python
 # Test data pipeline
-from pipelines.data_pipeline import data_pipeline_pyspark
-result = data_pipeline_pyspark(force_rebuild=True)
+from pipelines.data_pipeline import data_pipeline
+result = data_pipeline(
+    data_path="./data/raw/TelcoCustomerChurnPrediction.csv",
+    use_pyspark=True,
+    force_rebuild=True
+)
 
 # Test model training
-from pipelines.training_pipeline import training_pipeline_pyspark
-model = training_pipeline_pyspark(model_type='gbt')
+from pipelines.training_pipeline import training_pipeline
+model = training_pipeline(
+    model_type='gbt_classifier',
+    use_pyspark=True
+)
 
 # Test inference
-from pipelines.streaming_inference_pipeline import streaming_inference_pyspark
-prediction = streaming_inference_pyspark(input_data=sample_customer)
+from pipelines.streaming_inference_pipeline import streaming_inference
+prediction = streaming_inference(
+    use_pyspark=True,
+    input_data=sample_customer
+)
+```
+
+### Test Airflow DAGs
+
+```bash
+# Test DAG syntax
+airflow dags list
+
+# Test specific DAG
+airflow dags test telco_churn_ml_pipeline_dag 2024-01-01
+
+# Trigger DAG manually
+airflow dags trigger telco_churn_ml_pipeline_dag
 ```
 
 ## 📊 Monitoring & Observability
 
+### Airflow UI
+- **Local**: http://localhost:8080
+- **Credentials**: admin / admin
+- Monitor DAG runs, task status, and execution logs
+- View task dependencies and execution history
+
 ### Spark UI
 - **Local**: http://localhost:4040
 - **Cluster**: Check cluster manager UI
+- Monitor job execution, stages, and tasks
+- View executor metrics and storage
 
 ### MLflow UI
 ```bash
 # Start MLflow server
-mlflow ui --port 5000
+make mlflow-ui
 
-# Access at http://localhost:5000
+# Access at http://localhost:5001
 ```
+- Track experiments and runs
+- Compare model performance
+- View artifacts and parameters
+- Manage model registry
 
 ### Logging
 All components include comprehensive logging:
@@ -355,28 +546,52 @@ Ensure all functions used in Spark transformations are serializable.
 ## 📁 Project Structure
 
 ```
-├── src/                          # Core PySpark modules
-│   ├── data_ingestion.py         # PySpark data loading
-│   ├── feature_encoding.py       # PySpark ML encoders
-│   ├── model_building.py         # PySpark ML models
-│   └── ...
-├── pipelines/                    # Pipeline implementations
-│   ├── data_pipeline.py  # PySpark data pipeline
-│   ├── training_pipeline.py # PySpark training
-│   └── streaming_inference_pipeline.py # Real-time inference
-├── utils/                        # Utilities
-│   ├── spark_utils.py           # Spark session management
-│   ├── mlflow_utils.py          # MLflow PySpark support
-│   └── config.py                # Configuration management
-├── data/                         # Data directories
-│   ├── raw/                     # Raw data
-│   └── processed/               # Processed data (Parquet)
-├── artifacts/                    # Model artifacts
-│   ├── models/                  # Trained models
-│   └── encode/                  # Encoders
-├── config.yaml                  # Configuration file
-├── requirements.txt             # Dependencies
-└── README.md                   # This file
+.
+├── Readme.md                    # Project documentation
+├── Makefile                     # Automation commands for setup and execution
+├── config.yaml                  # Central configuration file
+├── requirements.txt             # Python dependencies
+│
+├── dags/                        # Apache Airflow DAGs
+│   ├── telco_churn_ml_pipeline_dag.py              # Main ML pipeline orchestration
+│   ├── telco_churn_hyperparameter_tuning_dag.py    # Hyperparameter optimization
+│   └── telco_churn_model_monitoring_dag.py         # Model monitoring and drift detection
+│
+├── pipelines/                   # End-to-end pipeline implementations
+│   ├── data_pipeline.py         # Data ingestion and preprocessing pipeline
+│   ├── training_pipeline.py     # Model training and evaluation pipeline
+│   └── streaming_inference_pipeline.py  # Real-time inference pipeline
+│
+├── src/                         # Core PySpark ML modules
+│   ├── __init__.py
+│   ├── data_ingestion.py        # PySpark data loading and validation
+│   ├── handle_missing_values.py # Missing value imputation strategies
+│   ├── outlier_detection.py     # Outlier detection and handling
+│   ├── feature_binning.py       # Feature binning transformations
+│   ├── feature_encoding.py      # PySpark ML encoders (StringIndexer, OneHotEncoder)
+│   ├── feature_scaling.py       # Feature scaling (StandardScaler, MinMaxScaler)
+│   ├── data_spiltter.py         # Train-test splitting
+│   ├── model_building.py        # PySpark ML model builders
+│   ├── model_training.py        # Training orchestration with cross-validation
+│   ├── model_evaluation.py      # Model evaluation metrics
+│   └── model_inference.py       # Batch and streaming inference
+│
+├── utils/                       # Utility modules
+│   ├── __init__.py
+│   ├── spark_utils.py           # Spark session management and configuration
+│   ├── mlflow_utils.py          # MLflow integration for PySpark
+│   ├── airflow_utils.py         # Airflow helper functions
+│   ├── config.py                # Configuration management
+│   └── logger.py                # Logging configuration
+│
+└── artifacts/                   # Generated artifacts (gitignored)
+    ├── models/                  # Trained PySpark ML pipelines
+    ├── data/                    # Processed data (Parquet format)
+    ├── evaluation/              # Model evaluation reports
+    └── mlflow_training_artifacts/  # MLflow experiment artifacts
+
+Note: data/ directory structure is created at runtime when pipelines are executed.
+      Raw data should be placed in data/raw/ directory.
 ```
 
 ## 🤝 Contributing
@@ -394,9 +609,20 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 🙏 Acknowledgments
 
 - **Apache Spark** for distributed computing framework
+- **Apache Airflow** for workflow orchestration and scheduling
 - **MLflow** for experiment tracking and model registry
-- **PySpark ML** for machine learning capabilities
+- **PySpark ML** for scalable machine learning capabilities
 - **Community** for continuous support and contributions
+
+## 🚧 Future Enhancements
+
+- [ ] **Kafka Integration**: Real-time data streaming from Kafka topics
+- [ ] **REST API**: FastAPI-based prediction service
+- [ ] **Docker Support**: Containerized deployment
+- [ ] **Kubernetes**: Cloud-native orchestration
+- [ ] **Advanced Monitoring**: Prometheus and Grafana integration
+- [ ] **A/B Testing**: Model comparison in production
+- [ ] **Feature Store**: Centralized feature management
 
 ---
 
@@ -404,12 +630,12 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 For questions, issues, or contributions:
 
-- **Documentation**: See [PYSPARK_GUIDE.md](PYSPARK_GUIDE.md) for detailed guide
 - **Issues**: Open an issue on GitHub
 - **Discussions**: Use GitHub Discussions for questions
+- **Documentation**: See inline code documentation and config.yaml
 
 ---
 
-**🚀 Ready to scale your machine learning with PySpark!**
+**🚀 Built for scalable, production-ready machine learning with PySpark, Airflow, and MLflow!**
 
-*Built with ❤️ for enterprise-scale machine learning*
+*Developed with ❤️ for enterprise-scale machine learning and automated workflow orchestration*
